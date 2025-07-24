@@ -1,0 +1,24 @@
+#!/bin/bash
+
+# List of source file paths
+files=(
+  "/path/to/file1.txt"
+  "/path/to/file2.txt"
+  "/path/to/file3.txt"
+  "/path/to/file4.txt"
+  "/path/to/file5.txt"
+  "/path/to/file6.txt"
+)
+
+# Destination directory
+destination="/destination/folder"
+
+# Copy each file every 10 seconds
+for file in "${files[@]}"; do
+  echo "Copying $file to $destination"
+  cp "$file" "$destination"
+  echo "Waiting 10 seconds before next copy..."
+  sleep 10
+done
+
+echo "All files copied."

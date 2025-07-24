@@ -1,0 +1,10 @@
+astropy==6.0.0
+blinker==1.9.0
+bokeh==3.0.0
+Flask-SocketIO==5.5.1
+Flask-WTF==1.0.0
+narwhals==1.33.0
+pip==24.0
+setuptools==65.5.0
+SQLAlchemy==2.0.40
+watchdog==2.1.0

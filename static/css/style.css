@@ -1,0 +1,78 @@
+/* Optional: Add some custom styling for better spacing or logo size */
+.navbar-brand img {
+    height: 40px; /* Adjust as needed */
+    margin-right: 10px;
+}
+body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh; /* Make sure the body takes at least the full viewport height */
+}
+.content {
+    flex: 1; /* Allow the content to grow and push the footer down */
+}
+.footer-status-bar {
+    background-color: #f8f9fa; /* Light background for the status bar */
+    padding: 1rem 0;
+    border-top: 1px solid #e9ecef;
+    color: #6c757d; /* Muted text color */
+    font-size: 0.9em;
+}
+/* Custom styles for connection status */
+.status-online {
+    color: green;
+    font-weight: bold;
+}
+.status-offline {
+    color: red;
+    font-weight: bold;
+}
+/* Style for the plot container */
+#fitsPlotContainer, #headerInfoContainer {
+    margin-top: 20px;
+    background-color: #f0f0f0;
+    border-radius: 8px;
+    padding: 10px;
+    text-align: center;
+    /* Added min-height to ensure visual presence even when empty */
+    min-height: 400px;
+    display: flex; /* Use flexbox for centering content inside */
+    flex-direction: column; /* Stack children vertically */
+    align-items: center; /* Center horizontally */
+    overflow: auto; /* Enable scrolling if content exceeds height */
+}
+#fitsPlotContainer {
+    justify-content: center; /* Keep plot container content centered vertically */
+}
+#headerInfoContainer {
+    text-align: left; /* Adjust text alignment for header details */
+    padding: 20px; /* More padding for header text */
+    font-family: monospace; /* Monospace font for header data */
+    font-size: 0.9em;
+    background-color: #e9ecef; /* Slightly different background for distinction */
+    justify-content: flex-start; /* Aligns content to the top */
+}
+/* Removed #headerInfoContainer h4 specific styling as it's now outside */
+#headerInfoContainer dl {
+    margin-bottom: 0;
+    margin-left: 0;
+    padding-left: 0;
+
+    /* --- NEW: Grid layout for dt/dd pairs --- */
+    display: grid;
+    grid-template-columns: 120px 1fr; /* Key takes 120px, value takes rest of available space */
+    gap: 5px 10px; /* 5px vertical gap, 10px horizontal gap between key and value */
+    width: 100%; /* Ensure dl takes full width of its container */
+}
+#headerInfoContainer dt {
+    /* Removed old flex/float properties as grid handles layout */
+    font-weight: bold;
+    color: #495057;
+    text-align: left; /* Ensures the text itself is left-aligned within its grid cell */
+}
+#headerInfoContainer dd {
+    /* Removed old flex/float properties as grid handles layout */
+    margin-bottom: 0; /* Reset default margin as grid gap controls spacing */
+    color: #212529;
+    word-break: break-all; /* Ensures long values wrap and don't overflow */
+}

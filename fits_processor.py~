@@ -1,0 +1,335 @@
+# fits_processor.py
+
+import os
+import time
+import numpy as np # For generating dummy plot data
+from astropy.io import fits
+from flask_socketio import SocketIO
+from bokeh.plotting import figure, show # Import Bokeh plotting tools
+from bokeh.resources import CDN # For CDN resources (JS/CSS)
+from bokeh.palettes import Category10
+
+from bokeh.embed import file_html # For saving plot to HTML
+
+# Global variable for SocketIO instance
+_socketio_instance = None
+
+# Define the directory for saving plots within static
+# Ensure this directory exists relative to app.py
+PLOT_SAVE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'plots')
+
+# Create the plots directory if it doesn't exist
+if not os.path.exists(PLOT_SAVE_DIR):
+    os.makedirs(PLOT_SAVE_DIR)
+    print(f"Created Bokeh plots directory: {PLOT_SAVE_DIR}")
+
+def set_socketio_instance_for_processor(sio):
+    """
+    Sets the SocketIO instance that will be used to emit events to clients
+    from the FITS processor. Called by fits_watcher.py.
+    """
+    global _socketio_instance
+    _socketio_instance = sio
+    print("SocketIO instance passed to fits_processor.py")
+
+def _wait_for_file_completion(filepath, timeout=300, check_interval=0.5, stable_checks=3):
+    """
+    Robustly waits for a file to stop growing in size, indicating it has
+    been completely written to disk. This is crucial for handling files
+    that are being actively transferred or generated, preventing premature
+    attempts to read incomplete files.
+    Adjusted default 'timeout' for better handling of network latency.
+
+    Args:
+        filepath (str): The full path to the file to monitor.
+        timeout (int): The maximum number of seconds (float) to wait before giving up.
+                       Increased default to 300 seconds (5 minutes) for network drives.
+        check_interval (float): The time (in seconds) to pause between file size checks.
+        stable_checks (int): The number of consecutive times the file size must remain
+                             unchanged before considering it "stable" (fully written).
+
+    Returns:
+        bool: True if the file became stable within the timeout, False otherwise.
+    """
+    print(f"Waiting for {os.path.basename(filepath)} to be completely written...")
+    start_time = time.time()
+    last_size = -1 # Initialize with an invalid size to ensure first check updates it
+    stable_count = 0 # Counter for consecutive stable size checks
+
+    while True:
+        # Check if timeout has been reached
+        if time.time() - start_time > timeout:
+            print(f"Timeout waiting for {os.path.basename(filepath)} to complete. Last recorded size: {last_size} bytes.")
+            return False
+
+        # Check if the file still exists (it might be moved or deleted during waiting)
+        if not os.path.exists(filepath):
+            print(f"File {os.path.basename(filepath)} disappeared while waiting.")
+            return False
+
+        try:
+            current_size = os.path.getsize(filepath)
+        except OSError as e:
+            # Handle cases where the file might be temporarily locked or inaccessible
+            print(f"Warning: Could not get size of {os.path.basename(filepath)}: {e}. Retrying in {check_interval}s...")
+            time.sleep(check_interval)
+            continue # Skip to the next iteration
+
+        if current_size == last_size:
+            # File size is stable, increment counter
+            stable_count += 1
+            if stable_count >= stable_checks:
+                # File has been stable for enough checks, consider it complete
+                print(f"File {os.path.basename(filepath)} appears stable at {current_size} bytes.")
+                return True
+        else:
+            # File size has changed, reset stable counter and update last size
+            stable_count = 0
+            last_size = current_size
+
+        time.sleep(check_interval) # Wait before checking again
+
+
+def create_and_save_bokeh_plot(filepath, filename_prefix, filename_extension, feeds, chs, spectrum_type):
+    """
+    Creates the Bokeh plot from the recorded data and saves it
+    as an HTML file in the static/plots directory.
+
+    Args:
+        filepath (str): A string containing the full FITS filename.
+
+    Returns:
+        str: The Flask-accessible URL to the saved Bokeh plot HTML file,
+             or None if an error occurred.
+    """
+
+    print(filename_extension, feeds, chs, spectrum_type)
+
+    # 1 - Extract Data and computes the averages through multiple raws (single spectra) of the FITS file
+    # 2 - Save Data
+
+    # According to the filename_extension [.fits, .fits#] we need to extrapolate data in a different way
+    # If the extension is '.fits', this correpsonds to the case mono-feed or nodding observation
+    # The logic to extract data for type 'spectra' or 'stokes' is the same
+    # However data relative to each pol type is separated in different columns [LCP, RCP] for 'spectra' type otherwise 'stokes' type are all in the same Ch data column
+    
+    data = []
+    averages = []
+    try:
+
+        # Open the FITS file. 'with' statement ensures the file is closed properly.
+        with fits.open(filepath) as hdul:
+
+            # case .fits file
+            if(filename_extension == '.fits'):
+                
+                # Extract the number of rows in the SECTION TABLE
+                # For SARDARA case this is equal to the number of columns of channel data
+                # chs =  len(hdul["SECTION TABLE"].data)
+                # print('Sections', chs) # chs, for 'spectra' type is the number of feeds x 2 (because the pol LCP and RCP are separated into dfferent data columns)
+
+                for i in range(len[feeds]):
+
+                    # case type 'spectra'
+                    if(spectrum_type == 'spectra'):
+
+                        index = feeds[i*2]
+                        print(index)
+                        data.append(np.array(hdul["DATA TABLE"].data[f"Ch{index}"]))
+                        index = feeds[i*2+1]
+                        print(index)
+                        data.append(np.array(hdul["DATA TABLE"].data[f"Ch{index}"]))
+
+                    else:
+                
+                        data.append(np.array(hdul["DATA TABLE"].data[f"Ch{feeds[i]}"]))
+                    
+        # For TOTAL-POWER backend, data are single points per row
+        # For SARDARA backend, data are, for example, 1024 channels per raw
+        # We need to calculate the average respect to the raws
+        # For the SARDARA case, each individual channel is averaged with itself through all the rows
+           
+        # Loop through each element in the array
+        if(type(data[0][0]) == np.ndarray):
+
+            for i in range(len(data)):
+
+                averages.append([float(sum(group) / len(group)) for group in zip(*data[i])])
+
+        else:
+
+            for i in range(len(data)):
+                
+                avg = []
+                # Calculate the average [case TOTAL POWER]
+                avg = sum(data[i]) / len(data[i])
+                # Store the average in array averages
+                averages.append([avg])
+
+    except Exception as e:
+        
+        print(f"Error creating/saving Bokeh plot for {filepath}: {e}")
+        return None
+
+    # Averages data are used to generate the Bokeh plot
+    # Averages data is an array of m raws (corresponding to the number of column Ch{i} and n columns corresponding to the number of bins (single data column rows))
+    try:    
+        # Create the x-axis values
+        x = np.linspace(0, len(averages[0]), len(averages[0]))
+   
+        # Create a new plot with a title and axis labels
+        p = figure(
+            title=f"Plot for {filename_prefix}",
+            x_axis_label='Channel',
+            y_axis_label='Counts',
+            width=720, height=400,
+            tools="pan,wheel_zoom,box_zoom,reset"
+        )
+
+        # Add a line renderer with a legend and color
+        # Define line colors
+        colors = Category10[len(averages)]  # A palette with 4 distinct colors)
+        
+        # Add each dataset as a line to the plot
+        #for i, data in enumerate(averages):
+        #    p.line(x, data, legend_label=f"Feed-{feeds[i]} LEFT", line_width=2, color=colors[i])
+        #    p.line(x, data, legend_label=f"Feed-{feeds[i+1]} RIGHT", line_width=2, color=colors[i+1])
+        #    i = i + 1
+
+        f = 0 # index relative to the feed number in the 'feeds' list
+
+        for i in range(0, len(averages), 2):
+            p.line(x, averages[i], legend_label=f"Feed-{feeds[f]} LEFT", line_width=2, color=colors[i])
+            p.line(x, averages[i+1], legend_label=f"Feed-{feeds[f]} RIGHT", line_width=2, color=colors[i+1])
+            f+=1
+
+        # Configure the legend to be interactive:
+        # "hide" will hide the glyph when clicked.
+        # "mute" will make the glyph transparent when clicked.
+        p.legend.click_policy = "hide"
+
+        # You might also want to customize legend location/orientation
+        # p.legend.location = "top_left"
+        # p.legend.orientation = "horizontal"
+        
+
+        # Construct the full path and URL for the HTML file
+        # Generate a unique ID using the current timestamp in milliseconds.
+        # This is appended to the filename to ensure browser caching doesn't
+        # serve an old version of the plot if the content changes but the base name is the same.
+        unique_id = int(time.time() * 1000)
+        plot_html_filename = f"{filename_prefix}_{unique_id}_plot.html"
+
+        full_plot_path = os.path.join(PLOT_SAVE_DIR, plot_html_filename)
+        # The URL for Flask's static files
+        plot_static_url = f"/static/plots/{plot_html_filename}"
+
+        # Save the plot to an HTML file
+        # CDN resources mean the JS/CSS libraries are loaded from a network
+        # rather than being embedded directly in the HTML, making the file smaller.
+        with open(full_plot_path, "w") as f:
+            f.write(file_html(p, CDN, title=f"FITS Data Plot: {filename_prefix}"))
+
+        print(f"Bokeh plot saved to: {full_plot_path}")
+        return plot_static_url
+
+    except Exception as e:
+
+        print(f"Error creating/saving Bokeh plot for {filename_prefix}: {e}")
+        return None
+
+    
+
+     
+
+
+def process_fits_file(filepath):
+    """
+    Manages the processing of a detected .fits file.
+    It first waits for the file to be fully written, then attempts to
+    extract its primary header, generates a plot, and emits both
+    to the frontend via SocketIO. This function is called by fits_watcher.py.
+    """
+    # Wait for the file to become stable (fully written)
+    if not _wait_for_file_completion(filepath):
+        print(f"Skipping processing of {os.path.basename(filepath)}: File did not stabilize or disappeared.")
+        return
+
+    try:
+        with fits.open(filepath) as hdul:
+            primary_header = hdul[0].header
+            print(f"\n--- Primary Header Keywords and Values for {os.path.basename(filepath)} ---")
+
+            header_data = {
+                "filename": os.path.basename(filepath),
+                "header": {}
+            }
+
+            for keyword, value in primary_header.items():
+                if keyword not in ['COMMENT', 'HISTORY']:
+                    print(f"{keyword}: {value}")
+                    header_data["header"][keyword] = str(value)
+
+            print("--------------------------------------------------\n")
+    
+            # --- Add extra keywords
+            for sec in hdul["SECTION TABLE"].data:
+                if(sec["id"] == 0):
+                    header_data["bins"] =  str(sec["bins"])
+                    header_data["bandwidth"] =  str(sec["bandwidth"])
+            
+            for rf in hdul["RF INPUTS"].data:
+                if(rf["section"] == 0):
+                    header_data["frequency"] = str(rf["frequency"])
+                    header_data["lo"] =  str(rf["localOscillator"])
+
+            # Extract the number of used feeds and create a string
+            feeds = hdul["RF INPUTS"].data["feed"] 
+
+            unique_values = sorted(set(feeds))
+            feeds_str = "[" + ",".join(str(x) for x in unique_values) + "]"
+
+            header_data["feeds"] = str(feeds_str)
+
+            # Get the type of spectra ('spectra' or 'stoke') and the number of channels per spectra per polarization
+            # In case of type 'Spectra' polarization can be LCP or RCP each spectrum of channels given by(sec["bins"]
+            # In case of type 'Stokes' polarization ar L, R, LL, RR in the same spectrum with channels given by(sec["bins"] x 4
+            chs = hdul["SECTION TABLE"].data["bins"][0]
+            spectrum_type = hdul["SECTION TABLE"].data["type"][0]
+
+            # Get the type of backend used
+            # from "load_subscans" first index is the item number in the list, second index the value [0]=file name, [1] signal flag, [2]=time
+            if("FEED_" in str(filepath)):
+                header_data["backend"] = "SKARAB"
+            else:
+                header_data["backend"] = "SARDARA"
+
+        filename_base = os.path.splitext(os.path.basename(filepath))[0]
+        filename_extension = os.path.splitext(os.path.basename(filepath))[1]
+       
+
+        # --- Get data and generate the Bokeh plot ---
+        # plot_url = create_and_save_bokeh_plot___(filepath)
+        plot_url = create_and_save_bokeh_plot(filepath, filename_base, filename_extension, unique_values, chs, spectrum_type)
+
+        if plot_url:
+            header_data["plot_url"] = plot_url
+            print(f"Plot URL added to data: {plot_url}")
+        else:
+            print("No plot URL generated for this FITS file.")
+
+
+        if _socketio_instance:
+            print(f"Emitting FITS header and plot URL for {os.path.basename(filepath)} to frontend.")
+            _socketio_instance.start_background_task(
+                _socketio_instance.emit, 'fits_header_update', header_data
+            )
+        else:
+            print("Warning: SocketIO instance not set in fits_processor.py, cannot emit header data.")
+
+    except Exception as e:
+
+        print(f"Error processing FITS file {os.path.basename(filepath)}: {e}")
+
+
+

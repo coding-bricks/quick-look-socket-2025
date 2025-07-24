@@ -1,0 +1,122 @@
+
+// script.js
+
+// JavaScript to update the current time in the status bar
+function updateCurrentTime() {
+    const now = new Date();
+    // Format the time (e.g., "HH:MM:SS AM/PM")
+    const timeOptions = { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true };
+    const timeString = now.toLocaleTimeString('en-US', timeOptions);
+
+    // Format the date (e.g., "Month Day, Year")
+    const dateOptions = { year: 'numeric', month: 'long', day: 'numeric' };
+    const dateString = now.toLocaleDateString('en-US', dateOptions);
+
+    // Assuming CET for your context (Sassari, Sardinia, Italy)
+    document.getElementById('currentTime').textContent = `${dateString} ${timeString} CET`;
+}
+
+// Update time immediately and then every second
+updateCurrentTime();
+setInterval(updateCurrentTime, 1000);
+
+// --- Socket.IO Client Logic ---
+// Connect to the Socket.IO server running on the same host and port
+const socket = io();
+const connectionStatusSpan = document.getElementById('connectionStatus');
+const sourceValueDisplay = document.getElementById('sourceValueDisplay'); // Get the element for SOURCE value
+const fitsPlotContainer = document.getElementById('fitsPlotContainer'); // Re-introduce this for plot logic
+
+// Function to update the connection status display
+function updateConnectionStatus(isConnected) {
+    if (isConnected) {
+        connectionStatusSpan.textContent = 'Online';
+        connectionStatusSpan.classList.remove('status-offline');
+        connectionStatusSpan.classList.add('status-online');
+    } else {
+        connectionStatusSpan.textContent = 'Offline';
+        connectionStatusSpan.classList.remove('status-online');
+        connectionStatusSpan.classList.add('status-offline');
+    }
+}
+
+// Initial status when the page loads (before connection is established)
+updateConnectionStatus(false); // Set to offline initially
+
+// Event listener for successful connection
+socket.on('connect', function() {
+    console.log('Connected to Flask-SocketIO server!');
+    updateConnectionStatus(true); // Update status to online
+});
+
+// Event listener for disconnection
+socket.on('disconnect', function() {
+    console.log('Disconnected from Flask-SocketIO server.');
+    updateConnectionStatus(false); // Update status to offline
+});
+
+// Event listener for 'fits_header_update' events from the server
+socket.on('fits_header_update', function(data) {
+    console.log('Received fits_header_update event:', data);
+
+    // --- Always post the header info immediately ---
+    console.groupCollapsed(`New FITS Header Received for: ${data.filename}`);
+    console.log('Full Data:', data);
+    console.log('Filename:', data.filename);
+    console.log('Header Keywords and Values:');
+    for (const key in data.header) {
+        if (Object.hasOwnProperty.call(data.header, key)) {
+            console.log(`  ${key}: ${data.header[key]}`);
+        }
+    }
+    console.groupEnd();
+
+     // --- Update Header Info Display ---
+    //headerFilenameDisplay.textContent = data.filename || 'N/A';
+    sourceValueDisplay.textContent = data.header.SOURCE || 'N/A';
+    raRadDisplay.textContent = data.header.RightAscension || 'N/A';
+    decRadDisplay.textContent = data.header.Declination || 'N/A';
+    loMHzDisplay.textContent = data.lo || 'N/A';
+    bwMHzDisplay.textContent = data.bandwidth || 'N/A';
+    scanNumDisplay.textContent = data.header.SCANID || 'N/A';
+    subScanNumDisplay.textContent = data.header.SubScanID || 'N/A';
+    channelsNumDisplay.textContent = data.bins || 'N/A';
+    feedNumDisplay.textContent = data.feeds || 'N/A';
+    bandDisplay.textContent = data.header['Receiver Code'] || 'N/A';
+    backendDisplay.textContent = data.backend || 'N/A';
+
+     // --- Add Bokeh plot display logic ---
+    if (data.plot_url) {
+        console.log('Plot URL received:', data.plot_url);
+        // Clear previous plot and create a new iframe for the new plot
+        fitsPlotContainer.innerHTML = ''; // Clear existing content (e.g., "Waiting for...")
+        const iframe = document.createElement('iframe');
+        iframe.src = data.plot_url;
+        // Make iframe explicitly block to allow margin: auto to work
+        iframe.style.display = 'block';
+        // Set width and height
+        iframe.style.width = '90%'; // Use 90% to leave space for centering
+        iframe.style.height = '450px'; // Adjust height as needed
+        // Remove border
+        iframe.style.border = '0';
+        iframe.style.borderRadius = '8px';
+        iframe.setAttribute('frameborder', '0'); // Remove default iframe border
+        // Explicitly center horizontally using auto margins
+        iframe.style.margin = '0 auto';
+
+        // Append the iframe. It will load asynchronously.
+        fitsPlotContainer.appendChild(iframe);
+        console.log('Iframe appended to container. Plot should now be loading.');
+
+        // Optional: rudimentary load/error handling for debugging
+        iframe.onload = () => console.log('Bokeh iframe loaded successfully.');
+        iframe.onerror = () => console.error('Error loading Bokeh iframe:', data.plot_url);
+
+    } else {
+        fitsPlotContainer.innerHTML = '<p class="text-muted">No plot available for this FITS file.</p>';
+        console.log('No plot URL provided in the received data.');
+    } 
+
+  
+});
+

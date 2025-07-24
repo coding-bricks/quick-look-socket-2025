@@ -1,0 +1,53 @@
+/* static/css/style.css */
+
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    display: flex; /* Rendi il body un contenitore flex */
+    flex-direction: column; /* Organizza gli elementi in colonna */
+    min-height: 100vh; /* Assicura che il body occupi almeno l'intera altezza della viewport */
+}
+
+.status-online {
+    color: green;
+    font-weight: bold;
+}
+.status-offline {
+    color: red;
+    font-weight: bold;
+}
+
+/* Stili per il logo con icona e testo */
+.navbar-brand {
+    font-weight: bold;
+    font-size: 24px;
+    display: flex; /* Per allineare icona e testo */
+    align-items: center; /* Allinea verticalmente */
+}
+
+.navbar-brand img {
+    margin-right: 8px; /* Spazio tra icona e testo */
+    height: 30px; /* Dimensione dell'icona (regola a piacere) */
+    width: auto;
+}
+
+.content {
+    flex-grow: 1; /* Fa in modo che il contenuto occupi lo spazio rimanente spingendo il footer in basso */
+    padding: 20px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+.footer {
+    background-color: #f1f1f1;
+    color: #555;
+    padding: 10px 20px;
+    text-align: center;
+    border-top: 1px solid #ddd;
+    font-size: 14px;
+    /* margin-top: auto; - Questo non � pi� strettamente necessario grazie a flex-grow nel .content */
+    width: 100%; /* Assicura che il footer occupi tutta la larghezza */
+}

@@ -1,0 +1,234 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>My Flask App</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" xintegrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <style>
+        /* Optional: Add some custom styling for better spacing or logo size */
+        .navbar-brand img {
+            height: 40px; /* Adjust as needed */
+            margin-right: 10px;
+        }
+        body {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh; /* Make sure the body takes at least the full viewport height */
+        }
+        .content {
+            flex: 1; /* Allow the content to grow and push the footer down */
+        }
+        .footer-status-bar {
+            background-color: #f8f9fa; /* Light background for the status bar */
+            padding: 1rem 0;
+            border-top: 1px solid #e9ecef;
+            color: #6c757d; /* Muted text color */
+            font-size: 0.9em;
+        }
+        /* Custom styles for connection status */
+        .status-online {
+            color: green;
+            font-weight: bold;
+        }
+        .status-offline {
+            color: red;
+            font-weight: bold;
+        }
+        /* Style for the plot container */
+        #fitsPlotContainer {
+            margin-top: 20px;
+            background-color: #f0f0f0;
+            border-radius: 8px;
+            padding: 10px;
+            text-align: center;
+            /* Added min-height to ensure visual presence even when empty */
+            height: 580px;
+	    /* height: auto; */
+            display: flex; /* Use flexbox for centering content inside */
+            flex-direction: column; /* Stack children vertically */
+            align-items: center; /* Center horizontally */
+            overflow: auto; /* Enable scrolling if content exceeds height */
+	    justify-content: center; /* Keep plot container content centered vertically */
+        }
+	
+	/* Dynamic height for header and feed containers based on content */
+        #headerInfoContainer, #feedSelectionContainer {
+	    margin-top: 20px;
+            min-height: 100px; /* A reasonable minimum height if content is very small */
+            height: auto; /* Allow height to adapt to content */
+            display: flex; /* Use flexbox for content alignment */
+            flex-direction: column; /* Stack children vertically */
+            align-items: flex-start; /* Align content to the left */
+            justify-content: flex-start; /* Aligns content to the top */
+            text-align: left; /* Adjust text alignment for header details */
+            padding: 20px; /* Symmetric padding */
+            font-family: monospace; /* Monospace font for header data */
+            font-size: 0.9em;
+            background-color: #e9ecef; /* Slightly different background for distinction */
+	    border-radius: 8px;
+        }
+      
+
+	
+        #fitsPlotContainer {
+            justify-content: center; /* Keep plot container content centered vertically */
+        }
+        #headerInfoContainer {
+            text-align: left; /* Adjust text alignment for header details */
+            padding: 20px; /* More padding for header text */
+            font-family: monospace; /* Monospace font for header data */
+            font-size: 0.9em;
+            background-color: #e9ecef; /* Slightly different background for distinction */
+            justify-content: flex-start; /* Aligns content to the top */
+        }
+
+	
+        /* Removed #headerInfoContainer h4 specific styling as it's now outside */
+        #headerInfoContainer dl {
+            margin-bottom: 0;
+            margin-left: 0;
+            padding-left: 0;
+
+            /* --- NEW: Grid layout for dt/dd pairs --- */
+            display: grid;
+            grid-template-columns: 120px 1fr; /* Key takes 120px, value takes rest of available space */
+            gap: 5px 10px; /* 5px vertical gap, 10px horizontal gap between key and value */
+            width: 100%; /* Ensure dl takes full width of its container */
+        }
+        #headerInfoContainer dt {
+            /* Removed old flex/float properties as grid handles layout */
+            font-weight: bold;
+            color: #495057;
+            text-align: left; /* Ensures the text itself is left-aligned within its grid cell */
+        }
+        #headerInfoContainer dd {
+            /* Removed old flex/float properties as grid handles layout */
+            margin-bottom: 0; /* Reset default margin as grid gap controls spacing */
+            color: #212529;
+            word-break: break-all; /* Ensures long values wrap and don't overflow */
+        }
+
+	#feedSelectionContainer {
+            text-align: left; /* Adjust text alignment for header details */
+            padding: 20px; /* More padding for header text */
+            font-family: monospace; /* Monospace font for header data */
+            font-size: 0.9em;
+            background-color: #e9ecef; /* Slightly different background for distinction */
+            justify-content: flex-start; /* Aligns content to the top */
+        }
+
+	 /* Specific styling for the new feed selection combobox */
+        #feedSelectionContainer .form-group {
+            display: grid;
+            /* Adjusted grid columns: label 120px (matches dt), select takes remaining space (1fr) */
+            grid-template-columns: 120px 1fr;
+            gap: 0 10px; /* No vertical gap, 10px horizontal gap */
+            align-items: center; /* Vertically align items in the grid row */
+            margin-bottom: 0; /* Remove default Bootstrap margin */
+            width: 100%; /* Ensure it takes full width for alignment */
+            padding: 5px 0; /* Add some padding to match dl items spacing */
+        }
+        #feedSelectionContainer .form-group label {
+            font-weight: bold;
+            color: #343a40;
+            text-align: left;
+        }
+        #feedSelectionContainer .form-group select {
+            width: 100%; /* Ensure select fills its grid cell */
+            max-width: none; /* Override any default max-width from Bootstrap if present */
+        }
+
+	/* Custom style for increased separation between the two left panels */
+        .feed-selection-h4 {
+            margin-top: 100px; /* Increased margin-top for more separation */
+        }
+
+
+ 
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-light bg-light">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <!-- Flask's url_for is crucial here to correctly link to the static file -->
+                <img src="{{ url_for('static', filename='img/app_icon.png') }}" alt="App Icon">
+                SRT Quick-Look
+            </a>
+            <!-- No toggler or links needed as per requirement -->
+        </div>
+    </nav>
+
+    <div class="container mt-5 content">
+        <!-- Removed the "Welcome to My Flask App!" container -->
+
+        <div class="row">
+            <!-- Container for Header Information (Now first and 1/3 width) -->
+            <div class="col-md-4">
+	        
+                     <h4>FITS Header Information</h4>
+                     <div id="headerInfoContainer">
+                         <dl id="headerDetailsList">
+                              <!-- <dt>Filename:</dt><dd id="headerFilename">N/A</dd> -->
+                              <dt>Source:</dt><dd id="sourceValueDisplay">N/A</dd>
+                              <dt>RA [rad]:</dt><dd id="raRadDisplay">N/A</dd>
+                              <dt>Dec. [rad]:</dt><dd id="decRadDisplay">N/A</dd>
+                              <dt>LO [MHz]:</dt><dd id="loMHzDisplay">N/A</dd>
+                              <dt>BW [MHz]:</dt><dd id="bwMHzDisplay">N/A</dd>
+                              <dt>Scan [#]:</dt><dd id="scanNumDisplay">N/A</dd>
+                              <dt>SubScan [#]:</dt><dd id="subScanNumDisplay">N/A</dd>
+                              <dt>Channels [#]:</dt><dd id="channelsNumDisplay">N/A</dd>
+                              <dt>Feed [#]:</dt><dd id="feedNumDisplay">N/A</dd>
+                              <dt>Band:</dt><dd id="bandDisplay">N/A</dd>
+                              <dt>Backend:</dt><dd id="backendDisplay">N/A</dd>
+			 </dl>
+                     </div>
+		     <!-- New Panel: Feed Selection -->
+                     <h4 class="feed-selection-h4">Feed Selection</h4> <!-- Added margin-top for spacing -->
+                     <div id="feedSelectionContainer">
+                         <div class="form-group">
+                              <label for="feedCombobox">Feed:</label>
+                              <select class="form-select" id="feedCombobox">
+				   <option value="0">0</option>
+                              </select>
+			 </div>
+                     </div>
+		     
+	
+
+            </div>
+
+            <!-- Container for the Bokeh Plot (Now second and 2/3 width) -->
+            <div class="col-md-8">
+                <h4>FITS Data Plot</h4>
+                <div id="fitsPlotContainer">
+                    <p class="text-muted">Waiting for a FITS file to be processed...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Removed the "Recent FITS Headers (check browser console)" container -->
+    </div>
+
+    <!-- Status Bar (Footer) -->
+    <footer class="footer-status-bar text-center mt-auto">
+        <div class="container">
+            <span class="text-muted">Application Status: <span id="connectionStatus">Offline</span> | Version 1.0 | Programmed by Dr. Fabio Schirru</span>
+            <span class="d-block d-md-inline ms-md-3 mt-1 mt-md-0">
+                Current Time: <span id="currentTime"></span>
+            </span>
+        </div>
+    </footer>
+
+
+    <!-- Bootstrap Bundle with Popper -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" xintegrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+    <!-- Socket.IO Client Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js" xintegrity="sha512-lu8d5FjYQh5n4R2lK/W/u0kY/fT/xL/zW8d9z4+vPzC/hT6e0+y5F2f2x5B4q6oW/y8zP/q6O+Q/9X2j7+5Q==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <!-- Your custom JavaScript -->
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>
