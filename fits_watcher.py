@@ -1,6 +1,7 @@
 # fits_watcher.py
 
 import os
+import re # Import the regular expression module
 import threading
 # Import PollingObserver specifically for more reliable monitoring on network/remote drives
 from watchdog.observers.polling import PollingObserver
@@ -13,15 +14,13 @@ from fits_processor import process_fits_file, set_socketio_instance_for_processo
 # Global variable to hold the directory to monitor.
 # It's initialized to a default, but can be updated by set_monitor_directory.
 MONITOR_DIRECTORY = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fits_files_default') # Changed to 'default'
-# Define the base FITS extension and the range for numbered extensions.
-BASE_FITS_EXTENSION = '.fits'
-NUMBERED_FITS_EXTENSIONS_RANGE = 19 # Maximum integer for .fits## (e.g., .fits0 to .fits19)
 
-# Generate a list of all valid FITS extensions
-# This will include '.fits', '.fits0', '.fits1', ..., '.fits19'
-FITS_EXTENSIONS = [BASE_FITS_EXTENSION] + [
-    f"{BASE_FITS_EXTENSION}{i}" for i in range(NUMBERED_FITS_EXTENSIONS_RANGE + 1)
-]
+# --- NEW: Use a regex pattern for FITS extensions ---
+# This regex matches:
+# - '.fits' (literally)
+# - OR '.fits' followed by one or more digits (e.g., .fits0, .fits12, .fits999)
+# The re.IGNORECASE flag makes the match case-insensitive (e.g., .FITS, .FiTs10)
+FITS_EXTENSION_PATTERN = re.compile(r'\.fits(\d+)?$', re.IGNORECASE)
 
 # Define subfolders to be explicitly excluded from processing, case-insensitive
 EXCLUDED_SUBFOLDERS = {'tempfits', 'tmp'}
@@ -78,32 +77,27 @@ class FitsFileHandler(FileSystemEventHandler):
         Args:
             event (FileSystemEvent): The event object representing the file system change.
         """
-      
+
         if event.is_directory:
-            # If a directory is created, it means new files might be placed inside it later.
-            # We don't process directories themselves, but the recursive flag will monitor its contents.
             return # Ignore directory creation events
 
         filepath = event.src_path
-        # Convert filepath to lowercase for case-insensitive matching
-        lower_filepath = filepath.lower()
         filename_base = os.path.basename(filepath)
+        lower_filename_base = filename_base.lower() # Convert to lowercase once for multiple checks
 
-        # 1. Check if the file ends with any of the defined FITS extensions
-        is_fits_file = False
-        for ext in FITS_EXTENSIONS:
-            if lower_filepath.endswith(ext):
-                is_fits_file = True
-                break # Found a match, no need to check further
-
-        if not is_fits_file:
+        # 1. Check if the file ends with any of the defined FITS extensions using regex
+        # This will match '.fits', '.fits0', '.fits123', etc. (case-insensitive)
+        if not FITS_EXTENSION_PATTERN.search(filename_base): # Search in original case for filename_base
+            # print(f"File '{filename_base}' skipped: Not a recognized FITS extension.") # Optional: uncomment for verbose logging
             return # Not a FITS file, ignore
 
-        # 2. Exclude files whose filename starts with 'Sum' (case-insensitive)
-        if filename_base.lower().startswith('sum'):
-            print(f"File '{filename_base}' skipped: Filename starts with 'Sum'.")
+        # 2. Exclude files whose filename starts with 'Sum', 'Sum_', or 'summary' (case-insensitive)
+        if lower_filename_base.startswith('sum') or \
+           lower_filename_base.startswith('sum_') or \
+           lower_filename_base.startswith('summary'):
+            print(f"File '{filename_base}' skipped: Filename starts with 'Sum', 'Sum_', or 'summary'.")
             return # Ignore this file
-
+       
         # 3. Exclude files located in specified temporary subfolders ('tempfits', 'tmp')
         file_dir = os.path.dirname(filepath)
         # Normalize paths for consistent comparison across operating systems

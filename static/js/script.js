@@ -16,6 +16,7 @@ function clearData() {
     feedNumDisplay.textContent = 'N/A'; // Clear this too
     bandDisplay.textContent = 'N/A';
     backendDisplay.textContent = 'N/A';
+    signalValueDisplay.textContent = 'N/A';
     fitsPlotContainer.innerHTML = '<p class="text-muted">Waiting for a FITS file to be processed...</p>';
 }
 
@@ -221,6 +222,7 @@ socket.on('fits_header_update', function(data) {
     feedNumDisplay.textContent = data.feeds || 'N/A';
     bandDisplay.textContent = data.header['Receiver Code'] || 'N/A';
     backendDisplay.textContent = data.backend || 'N/A';
+    signalValueDisplay.textContent = data.header.SIGNAL || 'N/A';
 
      // --- Add Bokeh plot display logic ---
     if (data.plot_url) {

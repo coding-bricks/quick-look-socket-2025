@@ -122,7 +122,11 @@ def start_app():
             print("ERROR: 'remote_drive_1' not found in config.ini. Cannot start without debug mode.")
             return
 
-        # Attempt to get the authenticated username
+        # Attempt to get the authenticated username (the username coincides with the project id)
+        # This would be typically used in production mode so that only the project id subfolders are monitored (it requires less machine resources)       
+        # In development mode (i.e. using the hpcdev machine) we need to comment all the next lines of code until point #4
+        # This because the project id would be 'fschirru' which does not exists inside the '/roach2_nuraghe/data' system
+
         username = None
         try:
             # os.getlogin() gets the user logged into the controlling tty
