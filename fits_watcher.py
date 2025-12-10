@@ -20,7 +20,9 @@ MONITOR_DIRECTORY = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fi
 # - '.fits' (literally)
 # - OR '.fits' followed by one or more digits (e.g., .fits0, .fits12, .fits999)
 # The re.IGNORECASE flag makes the match case-insensitive (e.g., .FITS, .FiTs10)
+
 FITS_EXTENSION_PATTERN = re.compile(r'\.fits(\d+)?$', re.IGNORECASE)
+
 
 # Define subfolders to be explicitly excluded from processing, case-insensitive
 EXCLUDED_SUBFOLDERS = {'tempfits', 'tmp'}
@@ -88,7 +90,7 @@ class FitsFileHandler(FileSystemEventHandler):
         # 1. Check if the file ends with any of the defined FITS extensions using regex
         # This will match '.fits', '.fits0', '.fits123', etc. (case-insensitive)
         if not FITS_EXTENSION_PATTERN.search(filename_base): # Search in original case for filename_base
-            # print(f"File '{filename_base}' skipped: Not a recognized FITS extension.") # Optional: uncomment for verbose logging
+            print(f"File '{filename_base}' skipped: Not a recognized FITS extension.") # Optional: uncomment for verbose logging
             return # Not a FITS file, ignore
 
         # 2. Exclude files whose filename starts with 'Sum', 'Sum_', or 'summary' (case-insensitive)
@@ -124,6 +126,9 @@ class FitsFileHandler(FileSystemEventHandler):
             _processing_files.add(filepath)
 
         print(f"\n--- Detected new FITS file: {os.path.basename(filepath)} ---")
+
+
+
         threading.Thread(target=self._safe_process_file, args=(filepath,)).start()
 
 

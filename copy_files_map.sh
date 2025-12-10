@@ -1,0 +1,32 @@
+#!/bin/bash
+
+#SOURCE_DIR="/home02/fabio.schirru/data/21-24/20240715/20240715-221648-21-24-3C286_K"
+
+SOURCE_DIR="/home02/fabio.schirru/data/KBAND/20250212/20250212-185345-KBAND-3C84AZ"
+DEST_DIR="/home02/fabio.schirru/github/quick-look_2025_socket/fits_files"
+
+echo "Monitoraggio avviato. Copia ogni 10 secondi..."
+  
+while true; do
+    for file in "$SOURCE_DIR"/*.fits; do
+        [ -e "$file" ] || continue   # Nessun file .fits
+
+        basefile=$(basename "$file")
+
+        # ? Salta i file che iniziano con 'Sum_'
+        if [[ $basefile == Sum_* ]]; then
+            continue
+        fi
+
+        destfile="$DEST_DIR/$basefile"
+
+        # Copia SOLO se non esiste o � pi� nuovo
+        if [ ! -e "$destfile" ] || [ "$file" -nt "$destfile" ]; then
+            cp "$file" "$destfile"
+            echo "$(date '+%Y-%m-%d %H:%M:%S') - Copiato: $basefile"
+
+            # Pausa di 10 secondi SOLO dopo una copia
+            sleep 10
+        fi
+    done
+done

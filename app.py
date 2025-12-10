@@ -4,6 +4,7 @@
 # app.py
 
 import os
+import state
 import sys # Import sys to access command-line arguments
 import threading
 import configparser
@@ -23,6 +24,8 @@ fits_observer = None
 
 # --- Configuration File Handling ---
 CONFIG_FILE_PATH = os.path.join(app.root_path, 'static', 'config.ini')
+
+
 
 def _create_default_config():
     """
@@ -93,6 +96,34 @@ def test_connect():
 @socketio.on('disconnect')
 def test_disconnect():
     print('Client disconnected:', threading.current_thread().name)
+
+@socketio.on('update_feed_selection')
+def handle_feed_selection(data):
+    """
+    It receives the new selected feed from the front-end and updates the global variable.
+    """
+    # Extra check: be sure that the feed number is an integer and manage the errors
+    try:
+        # 1. Ottiene e converte il nuovo Feed (new_feed � una variabile locale)
+        new_feed = int(data.get('feed', 0))
+
+        # 2. check and update the global state only if the value has changed
+        if new_feed != state.CURRENT_SELECTED_FEED:
+            
+            # update value inside the module 'state'
+            state.CURRENT_SELECTED_FEED = new_feed
+            
+            print(f"=====================================================")
+            print(f"SERVER STATE UPDATE: Feed selected to: {state.CURRENT_SELECTED_FEED}")
+            print(f"=====================================================")
+    
+            # (Optional: it is also possible to send a confirmation on the feed selected on the front-end)
+            # emit('feed_selection_confirmed', {'feed': CURRENT_SELECTED_FEED})
+    except ValueError:
+        print(f"ERRORE: No integer value for feed received: {data.get('feed')}")
+
+    # ...
+
 
 # --- Application Startup and Shutdown ---
 def start_app():

@@ -17,6 +17,7 @@ function clearData() {
     bandDisplay.textContent = 'N/A';
     backendDisplay.textContent = 'N/A';
     signalValueDisplay.textContent = 'N/A';
+    spectrumValueDisplay.textContent = 'N/A';
     fitsPlotContainer.innerHTML = '<p class="text-muted">Waiting for a FITS file to be processed...</p>';
 }
 
@@ -49,6 +50,19 @@ const feedCombobox = document.getElementById('feedCombobox'); // Get reference t
 
 // Global variable to store the last band used to populate the combobox
 let lastPopulatedBand = null;
+
+// =============================================
+// Listener to send selected feed to the backend
+// =============================================
+
+feedCombobox.addEventListener('change', function() {
+    const selectedFeed = feedCombobox.value;
+    console.log(`Feed selected changed to: ${selectedFeed}. Sending to server...`);
+    
+    // Invia i dati al backend tramite SocketIO
+    socket.emit('update_feed_selection', { feed: selectedFeed });
+});
+
 
 // Function to update the connection status display
 function updateConnectionStatus(isConnected) {
@@ -141,12 +155,21 @@ socket.on('fits_header_update', function(data) {
             feedCombobox.appendChild(option);
             feedCombobox.value = '0';
         }
+        
+        
+        // Send the default feed value (0) after updating the backend
+        socket.emit('update_feed_selection', { feed: feedCombobox.value }); // 
+        
         lastPopulatedBand = currentBand; // Update the last populated band
+
+
     } else {
         console.log(`Band '${currentBand}' is the same as last time. Skipping combobox repopulation.`);
     }
     // --- END NEW: Populate Feed Combobox ---
     
+    
+    // --- start FILTERING LOGIC ---
 
     // Check if the selected feed is present in the FITS header's feed array
     // Convert selectedFeed to number for strict comparison
@@ -154,6 +177,7 @@ socket.on('fits_header_update', function(data) {
     // For multi-feed case the check fails because the string (for example K-BAND) contains always all feeds i.e. [0,1,2,3,4,5,6]
     const selectedFeedNum = parseInt(selectedFeed, 10);
 
+    /*
     if (headerFeedsArray.length > 1) { // there is no need to treat the mono case since data will be displayed anyway!
 
 	console.log(`Backend '${data.backend}'`);
@@ -207,55 +231,64 @@ socket.on('fits_header_update', function(data) {
     }
     
     // --- END FEED FILTERING LOGIC ---
+    */
 
+    if (headerFeedsArray.includes(selectedFeedNum)) {
 
-    // --- Update Header Info Display ---
-    //headerFilenameDisplay.textContent = data.filename || 'N/A';
-    sourceValueDisplay.textContent = data.header.SOURCE || 'N/A';
-    raRadDisplay.textContent = data.header.RightAscension || 'N/A';
-    decRadDisplay.textContent = data.header.Declination || 'N/A';
-    loMHzDisplay.textContent = data.lo || 'N/A';
-    bwMHzDisplay.textContent = data.bandwidth || 'N/A';
-    scanNumDisplay.textContent = data.header.SCANID || 'N/A';
-    subScanNumDisplay.textContent = data.header.SubScanID || 'N/A';
-    channelsNumDisplay.textContent = data.bins || 'N/A';
-    feedNumDisplay.textContent = data.feeds || 'N/A';
-    bandDisplay.textContent = data.header['Receiver Code'] || 'N/A';
-    backendDisplay.textContent = data.backend || 'N/A';
-    signalValueDisplay.textContent = data.header.SIGNAL || 'N/A';
+        // --- Update Header Info Display ---
+        //headerFilenameDisplay.textContent = data.filename || 'N/A';
+        sourceValueDisplay.textContent = data.header.SOURCE || 'N/A';
+        raRadDisplay.textContent = data.header.RightAscension || 'N/A';
+        decRadDisplay.textContent = data.header.Declination || 'N/A';
+        loMHzDisplay.textContent = data.lo || 'N/A';
+        bwMHzDisplay.textContent = data.bandwidth || 'N/A';
+        scanNumDisplay.textContent = data.header.SCANID || 'N/A';
+        subScanNumDisplay.textContent = data.header.SubScanID || 'N/A';
+        channelsNumDisplay.textContent = data.bins || 'N/A';
+        feedNumDisplay.textContent = data.feeds || 'N/A';
+        bandDisplay.textContent = data.header['Receiver Code'] || 'N/A';
+        backendDisplay.textContent = data.backend || 'N/A';
+        signalValueDisplay.textContent = data.header.SIGNAL || 'N/A';
+        spectrumValueDisplay.textContent = data.spectrum.toUpperCase() || 'N/A';
 
-     // --- Add Bokeh plot display logic ---
-    if (data.plot_url) {
-        console.log('Plot URL received:', data.plot_url);
-        // Clear previous plot and create a new iframe for the new plot
-        fitsPlotContainer.innerHTML = ''; // Clear existing content (e.g., "Waiting for...")
-        const iframe = document.createElement('iframe');
-        iframe.src = data.plot_url;
-        // Make iframe explicitly block to allow margin: auto to work
-        iframe.style.display = 'block';
-        // Set width and height
-        iframe.style.width = '96%'; // Use 90% to leave space for centering
-        iframe.style.height = '560px'; // Adjust height as needed
-        // Remove border
-        iframe.style.border = '0';
-        iframe.style.borderRadius = '8px';
-        iframe.setAttribute('frameborder', '0'); // Remove default iframe border
-        // Explicitly center horizontally using auto margins
-        iframe.style.margin = '0 auto';
+        // --- Add Bokeh plot display logic ---
+        if (data.plot_url) {
+            console.log('Plot URL received:', data.plot_url);
+            // Clear previous plot and create a new iframe for the new plot
+            fitsPlotContainer.innerHTML = ''; // Clear existing content (e.g., "Waiting for...")
+            const iframe = document.createElement('iframe');
+            iframe.src = data.plot_url;
+            // Make iframe explicitly block to allow margin: auto to work
+            iframe.style.display = 'block';
+            // Set width and height
+            iframe.style.width = '96%'; // Use 90% to leave space for centering
+            iframe.style.height = '560px'; // Adjust height as needed
+            // Remove border
+            iframe.style.border = '0';
+            iframe.style.borderRadius = '8px';
+            iframe.setAttribute('frameborder', '0'); // Remove default iframe border
+            // Explicitly center horizontally using auto margins
+            iframe.style.margin = '0 auto';
 
-        // Append the iframe. It will load asynchronously.
-        fitsPlotContainer.appendChild(iframe);
-        console.log('Iframe appended to container. Plot should now be loading.');
+            // Append the iframe. It will load asynchronously.
+            fitsPlotContainer.appendChild(iframe);
+            console.log('Iframe appended to container. Plot should now be loading.');
 
-        // Optional: rudimentary load/error handling for debugging
-        iframe.onload = () => console.log('Bokeh iframe loaded successfully.');
-        iframe.onerror = () => console.error('Error loading Bokeh iframe:', data.plot_url);
+            // Optional: rudimentary load/error handling for debugging
+            iframe.onload = () => console.log('Bokeh iframe loaded successfully.');
+            iframe.onerror = () => console.error('Error loading Bokeh iframe:', data.plot_url);
+
+        } else {
+            fitsPlotContainer.innerHTML = '<p class="text-muted">No plot available for this FITS file.</p>';
+            console.log('No plot URL provided in the received data.');
+        } 
 
     } else {
-        fitsPlotContainer.innerHTML = '<p class="text-muted">No plot available for this FITS file.</p>';
-        console.log('No plot URL provided in the received data.');
-    } 
 
-  
+        console.log(`Skipping file '${data.filename}': Selected feed (${selectedFeed}) does not match any feed in header (${headerFeedString}).`);
+        // Uncomment to clear the display, otherwise, leave the last data while returning
+        //clearData();
+        return; // Stop processing this event if no match
+    }
 });
 
