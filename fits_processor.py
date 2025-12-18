@@ -23,7 +23,7 @@ from bokeh.plotting import figure, column, show # Import Bokeh plotting tools
 from bokeh.resources import CDN # For CDN resources (JS/CSS)
 from bokeh.palettes import Category10
 from bokeh.models import LinearAxis, Range1d
-from bokeh_server import update_bokeh_plot
+from bokeh_server import update_bokeh_plot, update_scatter_plot, reset_scatter_plot
 from bokeh.embed import file_html # For saving plot to HTML
 
 
@@ -112,7 +112,7 @@ def _wait_for_file_completion(filepath, timeout=300, check_interval=0.5, stable_
         time.sleep(check_interval) # Wait before checking again
 
 
-def _extract_data_and_perform_averages(filepath, filename_prefix, filename_extension, feeds, chs, spectrum_type, backend, freq, lo, bw, sub_scan_type):
+def _extract_data_and_perform_averages(filepath, filename_prefix, filename_extension, feeds, chs, spectrum_type, backend, freq, lo, bw, sub_scan_type, subscan):
 
      # ----------------------------------------------------------------------
     # START TIME: Inizio della funzione
@@ -184,39 +184,78 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
             is_map = is_map_by_keyword(sub_scan_type)
             print(f'FITS file relative to a map: {is_map}')
 
-        if data:
-            if(type(data[0][0]) == np.ndarray):
-                # Caso SPETTRO [righe x canali] o MAPPA [righe x canali]
-                
-                # *** QUI INSERIAMO LA LOGICA DI BIFORCAZIONE ***
-                
+
+            if data:
+
                 if not is_map:
 
                     # ----------------------------------------------------
                     # ?? QUI INSERIAMO LA LOGICA DI RESET ??
                     # ----------------------------------------------------
-                    
+                        
                     # Verifichiamo se Pol0 (o qualsiasi altra Pol) contiene dati.
-                    if state.GLOBAL_MAP_CACHE['Pol0']['RA'].size > 0:
+                    if state.GLOBAL_MAP_CACHE['Pol0']['X'].size > 0:
                         print(">>> Rilevato cambio di modalit� a Spettro. Reset CACHE MAPPA.")
                         # Chiama la funzione di reset dal modulo state.py
                         state.initialize_map_cache()
 
+                        # AGGIUNTA FONDAMENTALE PER LO SCATTER:
+                        if state.USE_SCATTER_MODE:
+                            reset_scatter_plot()
 
-                    # ----------------------------------------------------
-                    # CASO 1: SPETTRO QUICK-LOOK (Media Verticale)
-                    # La media viene calcolata per ogni canale lungo l'asse 0 (tempo/righe).
-                    # Risultato: array 1D (Spettro Medio).
-                    # ----------------------------------------------------
-                    print("MODE: SPECTRA (Vertical Averaging)")
-                    for i in range(len(data)):
-                        averages.append(np.nanmean(data[i], axis=0)) # <--- MEDIA VERTICALE
-                        
-                    # Creazione asse X (Canali)
-                    x = np.linspace(0, len(averages[0]), len(averages[0]))
-                    x_axis_label_val = 'Channel'
+
+
+                    # The next condition discriminates for single point data (i.e. TP) or array data (i.e. SARDARA, SKARAB)
+                    if(type(data[0][0]) == np.ndarray): # case SARDARA, SKARAB
+
+                        # ----------------------------------------------------
+                        # CASO 1: SPETTRO QUICK-LOOK (Media Verticale)
+                        # La media viene calcolata per ogni canale lungo l'asse 0 (tempo/righe).
+                        # Risultato: array 1D (Spettro Medio).
+                        # ----------------------------------------------------
+                        print("MODE: SPECTRA (Vertical Averaging)")
+                        for i in range(len(data)):
+                            averages.append(np.nanmean(data[i], axis=0)) # <--- MEDIA VERTICALE
+                            
+                        # Creazione asse X (Canali)
+                        x = np.linspace(0, len(averages[0]), len(averages[0]))
+                        x_axis_label_val = 'Channel'
+
+                    else:
+
+                        # Caso TOTAL POWER (Singolo punto per riga)
+                        for i in range(len(data)):
+                            # Qui data[i] � gi� un array di singoli punti (la serie temporale)
+                            averages.append(data[i]) 
                     
-                else:
+                        # Creazione asse X (Punti Campione)
+                        x = np.linspace(0, len(averages[0]), len(averages[0]))
+                        x_axis_label_val = 'Sampling Point'
+
+                    # ----------------------------------------------------------------------
+                    # TIMER 1: Tempo di I/O Disco (fits.open/hdul.data) e Calcolo Media (np.mean)
+                    end_time_io_calc = time.time()
+                    print(f"PROFILING: [Timer 1] I/O Disco + Calcolo Media completato in {end_time_io_calc - start_time_io_calc:.4f} secondi.")
+
+                    return _plot_and_save_html(PLOT_SAVE_DIR, filepath, filename_prefix, filename_extension, feeds, chs, spectrum_type, 
+                        backend, x_axis_label_val, x, averages, feed_number, start_time_total, freq, lo, bw)
+
+                else: # is a map
+
+                    # If the subscan number is smaller or equal than that stored in the state.py
+                    # the map is re-initialized
+                    if(subscan <= state.LAST_PROCESSED_SUBSCAN_ID):
+                       
+                        print(">>> New Map detected. Map CACHE reset.")
+                        # Chiama la funzione di reset dal modulo state.py
+                        state.initialize_map_cache()
+                        state.LAST_PROCESSED_SUBSCAN_ID = subscan
+
+                        # AGGIUNTA FONDAMENTALE PER LO SCATTER:
+                        if state.USE_SCATTER_MODE:
+                            reset_scatter_plot()
+
+
                     # ----------------------------------------------------
                     # CASO 2: MAPPA (Media Orizzontale)
                     # La media viene calcolata per ogni riga lungo l'asse 1 (canali).
@@ -229,29 +268,40 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                     # Check the type of Map i.e. RA-DEC or AZ-EL
                     # We get the answer from th value of sub_sca_type
 
-                    if(sub_scan_type == 'RA' or sub_scan_type == 'DEC'):
-                        # Get RA and DEC data
-                        x_data = np.array(hdul["DATA TABLE"].data["raj2000"])
-                        y_data = np.array(hdul["DATA TABLE"].data["decj2000"])
+                    # ----------------------------------------------------
+                    # ESTRAZIONE COORDINATE RA/DEC o AZ/EL
+                    # ----------------------------------------------------
+                    x_data, y_data = _extract_coordinates_for_map(hdul, sub_scan_type)
+                    print(f"COORDINATE: Tipo {sub_scan_type} estratte con {x_data.size} punti.")
 
-                    if(sub_scan_type == 'AZ' or sub_scan_type == 'EL'):
-                        # Get RA and DEC data
-                        x_data = np.array(hdul["DATA TABLE"].data["az"])
-                        y_data = np.array(hdul["DATA TABLE"].data["el"])
-                      
-                    
                     all_pi_data = []
-                    for i in range(len(data)):
-                        # Esegui la media orizzontale (lungo i canali)
-                        pi_data = np.nanmean(data[i], axis=1) # <--- MEDIA ORIZZONTALE (Potenza P_i)
 
-                        print(pi_data)
-                        
-                        # In modalit� MAPPA, 'averages' conterr� le P_i di tutte le polarizzazioni/feeds
-                        # di quel file, ma tipicamente per la mappa userai SOLO il primo set.
-                        averages.append(pi_data) 
-                        all_pi_data.append(pi_data) # Raccogli tutti i P_i per i metadata
-                        
+                    print(f'Selected feed for mapping: {state.CURRENT_SELECTED_FEED}')
+
+                    # The next condition discriminates for single point data (i.e. TP) or array data (i.e. SARDARA, SKARAB)
+                    if(type(data[0][0]) == np.ndarray): # case SARDARA, SKARAB
+
+                        for i in range(len(data)):
+                            # Esegui la media orizzontale (lungo i canali)
+                            pi_data = np.nanmean(data[i], axis=1) # <--- MEDIA ORIZZONTALE (Potenza P_i)
+                            
+                            # In modalit� MAPPA, 'averages' conterr� le P_i di tutte le polarizzazioni/feeds
+                            # di quel file, ma tipicamente per la mappa userai SOLO il primo set.
+                            averages.append(pi_data) 
+                            all_pi_data.append(pi_data) # Raccogli tutti i P_i per i metadata
+
+                    else:
+
+                        # Here we need to filter data only for the selected feed
+                        # For TP the average coincides with the data point having only one channel per raw
+
+                        averages.append(data[state.CURRENT_SELECTED_FEED])
+                        averages.append(data[state.CURRENT_SELECTED_FEED+1])
+
+                        all_pi_data.append(data[state.CURRENT_SELECTED_FEED]) # Raccogli tutti i P_i per i metadata
+                        all_pi_data.append(data[state.CURRENT_SELECTED_FEED+1]) # Raccogli tutti i P_i per i metadata
+
+   
                     # L'asse X in questo caso non � il canale, ma il Punto Campione (la riga)
                     # Questi P_i verranno poi accoppiati con RA/DEC.
                     x = np.linspace(0, len(averages[0]), len(averages[0]))
@@ -272,46 +322,21 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                         # Trigger Asincrono
                         trigger_gridding_process() # <--- LA CHIAMATA � QUI
 
-                        
+                            
                     elif len(all_pi_data) == 1:
                         print("Rilevati dati per singola polarizzazione/feed. Nessuna azione di aggiornamento dual-pol.")
                         # Potresti aggiungere qui una logica per gestire il singolo feed se necessario
                         
                     # --- SUCCESSIVAMENTE: ATTIVAZIONE GRIGLIATORE ASINCRONO (Worker B) ---
                     # worker_b.trigger_regridding()
-
-                   
-
-    
-    
-
-
+                        
+                # fine blocco if not is_map / else    
+                # Update subscan number to state.py
+                state.LAST_PROCESSED_SUBSCAN_ID = subscan
                     
-                # fine blocco if not is_map / else
-                
             else:
-                # Caso TOTAL POWER (Singolo punto per riga)
-                for i in range(len(data)):
-                    # Qui data[i] � gi� un array di singoli punti (la serie temporale)
-                    averages.append(data[i]) 
-                
-                # Creazione asse X (Punti Campione)
-                x = np.linspace(0, len(averages[0]), len(averages[0]))
-                x_axis_label_val = 'Sampling Point'
-                
-        else:
-            raise Exception("Nessun dato estratto dal file FITS.")
+                raise Exception("Nessun dato estratto dal file FITS.")
         
-       
-
-
-        # ----------------------------------------------------------------------
-        # TIMER 1: Tempo di I/O Disco (fits.open/hdul.data) e Calcolo Media (np.mean)
-        end_time_io_calc = time.time()
-        print(f"PROFILING: [Timer 1] I/O Disco + Calcolo Media completato in {end_time_io_calc - start_time_io_calc:.4f} secondi.")
-
-        return _plot_and_save_html(PLOT_SAVE_DIR, filepath, filename_prefix, filename_extension, feeds, chs, spectrum_type, 
-            backend, x_axis_label_val, x, averages, feed_number, start_time_total, freq, lo, bw)
     
     except Exception as e:
         print(f"ERRORE GRAVE nel calcolo delle medie per {filename_prefix}: {e}")
@@ -411,7 +436,6 @@ def process_fits_file(filepath):
             if not should_process:
                 return # File scartato dal filtro feed
 
-                      
 
             # ----------------------------------------------------------------------
             # ?? PUNTO DI DISCRIMINAZIONE E INOLTRO AL NODDING MANAGER
@@ -477,7 +501,8 @@ def process_fits_file(filepath):
         # --- Get data and generate the Bokeh plot ---
         # plot_url = create_and_save_bokeh_plot___(filepath)
         plot_url = _extract_data_and_perform_averages(filepath, filename_base, filename_extension, 
-            acq_feeds_unique_values, int(header_data.get("bins")), header_data.get("spectrum"), backend, freq, lo, bw, header_data.get("sub_scan_type"))
+            acq_feeds_unique_values, int(header_data.get("bins")), header_data.get("spectrum"), backend, freq, lo, bw, header_data.get("sub_scan_type"),
+            int(header_data["header"]["SubScanID"]))
 
             
         if plot_url:
@@ -686,56 +711,129 @@ def update_global_point_cloud_dual_pol(
     y_data_new: np.ndarray, 
     all_pi_data_new: List[np.ndarray]
 ) -> None:
-    """
-    Aggiorna due Nuvole di Punti (Pol0 e Pol1) all'interno dello stato globale (state.py) 
-    con i nuovi dati P_i e aggiorna i rispettivi limiti globali.
-    
-    Non richiede pi� global_map_cache come parametro, accede direttamente a state.GLOBAL_MAP_CACHE.
 
-    Parametri:
-    - ra_data_new: Array NumPy delle coordinate RA della nuova strisciata (in gradi).
-    - dec_data_new: Array NumPy delle coordinate DEC della nuova strisciata (in gradi).
-    - all_pi_data_new: Lista NumPy 1D di Potenze P_i (index 0 = Pol0, index 1 = Pol1).
-    """
-    
-    # Chiavi di polarizzazione e limite massimo di polarizzazioni da gestire
-    polarization_keys = ['Pol0', 'Pol1'] 
-    num_pols = min(len(all_pi_data_new), 2)
-    
-    # 1. Calcola i limiti RA/DEC della nuova strisciata (sono uguali per entrambe le pol.)
-    x_min_new = x_data_new.min()
-    x_max_new = x_data_new.max()
-    y_min_new = y_data_new.min()
-    y_max_new = y_data_new.max()
 
-    # 2. Cicla sulle polarizzazioni disponibili e aggiorna la cache
-    for i in range(num_pols):
-        pol_key = polarization_keys[i]
-        pi_data_current = all_pi_data_new[i]
+    if(state.USE_SCATTER_MODE != True):
+
+        """
+        Aggiorna due Nuvole di Punti (Pol0 e Pol1) all'interno dello stato globale (state.py) 
+        con i nuovi dati P_i e aggiorna i rispettivi limiti globali.
         
-        # Accede direttamente allo stato globale importato
-        cache = state.GLOBAL_MAP_CACHE[pol_key] 
+        Non richiede pi� global_map_cache come parametro, accede direttamente a state.GLOBAL_MAP_CACHE.
+
+        Parametri:
+        - ra_data_new: Array NumPy delle coordinate RA della nuova strisciata (in gradi).
+        - dec_data_new: Array NumPy delle coordinate DEC della nuova strisciata (in gradi).
+        - all_pi_data_new: Lista NumPy 1D di Potenze P_i (index 0 = Pol0, index 1 = Pol1).
+        """
         
-        # CONTROLLO DI CONSISTENZA:
-        if len(x_data_new) != len(pi_data_current):
-            print(f"ERRORE: Dati RA/DEC ({len(x_data_new)}) e P_i ({len(pi_data_current)}) per {pol_key} non corrispondono. Skippo.")
-            continue
+        # Chiavi di polarizzazione e limite massimo di polarizzazioni da gestire
+        polarization_keys = ['Pol0', 'Pol1'] 
+        num_pols = min(len(all_pi_data_new), 2)
+        
+        # 1. Calcola i limiti RA/DEC della nuova strisciata (sono uguali per entrambe le pol.)
+        x_min_new = x_data_new.min()
+        x_max_new = x_data_new.max()
+        y_min_new = y_data_new.min()
+        y_max_new = y_data_new.max()
+
+        # 2. Cicla sulle polarizzazioni disponibili e aggiorna la cache
+        for i in range(num_pols):
+            pol_key = polarization_keys[i]
+            pi_data_current = all_pi_data_new[i]
             
-        # APPEND DATA
-        cache['RA'] = np.concatenate([cache['RA'], x_data_new])
-        cache['DEC'] = np.concatenate([cache['DEC'], x_data_new])
-        cache['P'] = np.concatenate([cache['P'], pi_data_current])
+            # Accede direttamente allo stato globale importato
+            cache = state.GLOBAL_MAP_CACHE[pol_key] 
+            
+            # CONTROLLO DI CONSISTENZA:
+            if len(x_data_new) != len(pi_data_current):
+                print(f"ERRORE: Dati RA/DEC ({len(x_data_new)}) e P_i ({len(pi_data_current)}) per {pol_key} non corrispondono. Skippo.")
+                continue
+
+            # UPDATE GLOBAL LIMITS
+            cache['X_min'] = min(cache['X_min'], x_min_new) # Usare X_min
+            cache['X_max'] = max(cache['X_max'], x_max_new) # Usare X_max
+            cache['Y_min'] = min(cache['Y_min'], y_min_new) # Usare Y_min
+            cache['Y_max'] = max(cache['Y_max'], y_max_new) # Usare Y_max
+
+            # APPEND DATA
+            # Le coordinate X e Y sono accoppiate con P
+            cache['X'] = np.concatenate([cache['X'], x_data_new])
+            cache['Y'] = np.concatenate([cache['Y'], y_data_new]) 
+            cache['P'] = np.concatenate([cache['P'], pi_data_current])
+
+            print(f"? Aggiornata Nuvola {pol_key}. Totale Punti: {len(cache['X'])}. X Range: {cache['X_min']:.4f}/{cache['X_max']:.4f}")
+            print(f"? Aggiornata Nuvola {pol_key}. Totale Punti: {len(cache['Y'])}. Y Range: {cache['Y_min']:.4f}/{cache['Y_max']:.4f}")
+            
+    else:
+
+        try:
+            # Prepariamo il pacchetto dati per Bokeh
+            # Usiamo i dati "freschi" appena estratti dal file FITS corrente
+            scatter_payload = {
+                'Pol0': {
+                    'x': x_data_new.tolist(), 
+                    'y': y_data_new.tolist(), 
+                    'z': all_pi_data_new[0].tolist()
+                },
+                'Pol1': {
+                    'x': x_data_new.tolist(), 
+                    'y': y_data_new.tolist(), 
+                    'z': all_pi_data_new[1].tolist()
+                }
+            }
+            # Invio asincrono a Bokeh
+            update_scatter_plot(scatter_payload)
+        except Exception as e:
+            print(f"Errore durante lo streaming scatter: {e}")
+
+
+# FITS_processor.py
+
+# ... (altre importazioni)
+import map_gridding
+import state
+import bokeh_server
+# ...
+
+def run_gridding_task():
+    """
+    Worker B: Esegue la grigliatura e aggiorna l'interfaccia Bokeh.
+    Chiamata in un thread separato.
+    """
+    
+    # 1. Chiama la funzione di grigliatura (Worker B)
+    map_data = map_gridding.perform_gridding()
+
+    if map_data is None:
+        return
         
-        # UPDATE GLOBAL LIMITS
-        cache['RA_min'] = min(cache['RA_min'], x_min_new)
-        cache['RA_max'] = max(cache['RA_max'], x_max_new)
-        cache['DEC_min'] = min(cache['DEC_min'], y_min_new)
-        cache['DEC_max'] = max(cache['DEC_max'], y_max_new)
-        
-        print(f"? Aggiornata Nuvola {pol_key}. Totale Punti: {len(cache['RA'])}")
+    # --- DIAGNOSTICA IN CONSOLE (Punto di interesse) ---
+    print("\n----------------------------------------------------")
+    print("DIAGNOSTICA MAPPA GRIGLIATA RICEVUTA:")
+    
+    for pol_key in ['Pol0', 'Pol1']:
+        if pol_key in map_data:
+            data = map_data[pol_key]
+            
+            # Verifichiamo che l'immagine sia un array NumPy e non vuota
+            if isinstance(data['image'], np.ndarray) and data['image'].size > 0:
+                print(f"- Mappa {pol_key} -")
+                print(f"  Shape: {data['image'].shape}")
+                print(f"  Range Potenza (Min/Max): {data['low_color']:.4f} / {data['high_color']:.4f}")
+                print(f"  Dimensioni (X/Y): {data['dw']:.4f} x {data['dh']:.4f} gradi")
+            else:
+                print(f"- Mappa {pol_key}: Dati non validi o vuoti.")
+
+    print("----------------------------------------------------")
+    # --------------------------------------------------------
+
+    # 2. Aggiorna il plot in Bokeh (Worker C)
+    bokeh_server.update_bokeh_plot(map_data)
 
 
 
+'''
 def run_gridding_task():
     """
     Wrapper che esegue il compito di grigliatura (Worker B) e gestisce l'output.
@@ -757,7 +855,7 @@ def run_gridding_task():
             
     except Exception as e:
         print(f"Worker B: ERRORE grave durante il grigliamento: {e}")
-
+'''
 
 
 
@@ -940,85 +1038,26 @@ def extract_metadata_and_filter(filepath: str, hdul: fits.HDUList) -> tuple[Dict
 
 
 
-def determine_map_coordinates(header_data: Dict[str, Any]) -> str:
-    """
-    Determina il tipo di operazione (Mappa o Non-Mappa) e, in caso di Mappa, 
-    il sistema di coordinate da estrarre, basandosi sulla chiave 'SubScanType'.
 
-    Ritorna:
-    - 'RA_DEC': Mappa in coordinate Celesti (usa le colonne 'ra'/'dec').
-    - 'EL_AZ': Mappa in coordinate Orizzontali (usa le colonne 'el'/'az').
-    - 'OTHER': Scansione NON-MAPPA (es. 'TRACKING', 'SPECTRUM').
-    """
+
+# FITS_processor.py (Nuova funzione)
+def _extract_coordinates_for_map(hdul, sub_scan_type) -> Tuple[np.ndarray, np.ndarray]:
+    """Estrae le coordinate X e Y (RA/DEC o AZ/EL) in base al tipo di scansione."""
     
-    # ?? Usa la chiave specifica fornita: "SubScanType" ??
-    subscan_type = header_data.get("SubScanType")
-
-    if subscan_type is None:
-        print("WARNING: Keyword 'SubScanType' mancante nell'header.")
-        return "OTHER"
+    if sub_scan_type == 'RA' or sub_scan_type == 'DEC':
+        # Assumiamo RA/DEC come (X, Y)
+        x_data = np.array(hdul["DATA TABLE"].data["raj2000"])
+        y_data = np.array(hdul["DATA TABLE"].data["decj2000"])
+        return x_data, y_data
         
-    # Standardizza il valore per la comparazione (opzionale, ma sicuro)
-    subscan_type = subscan_type.upper().strip()
+    elif sub_scan_type == 'AZ' or sub_scan_type == 'EL':
+        # Assumiamo AZ/EL come (X, Y)
+        x_data = np.array(hdul["DATA TABLE"].data["az"])
+        y_data = np.array(hdul["DATA TABLE"].data["el"])
+        return x_data, y_data
 
-    # --- 1. CASI NON-MAPPA ---
-    if subscan_type == "TRACKING" or subscan_type == "SPECTRUM":
-        return "OTHER" 
-
-    # --- 2. CASI MAPPA (Coordinate Celesti) ---
-    elif subscan_type in ["RA", "DEC"]:
-        # Se la scansione avviene in RA o DEC, usiamo le coordinate celesti.
-        print(f"DEBUG: SubScanType '{subscan_type}'. Scelgo RA/DEC.")
-        return "RA_DEC"
-        
-    # --- 3. CASI MAPPA (Coordinate Orizzontali) ---
-    elif subscan_type in ["AZ", "EL"]:
-        # Se la scansione avviene in AZ o EL, usiamo le coordinate orizzontali.
-        print(f"DEBUG: SubScanType '{subscan_type}'. Scelgo EL/AZ.")
-        return "EL_AZ"
-        
-    # --- 4. FALLBACK ---
     else:
-        print(f"PROCESSOR: Tipo di scansione '{subscan_type}' non riconosciuto per la mappatura. Skippo.")
-        return "OTHER"
-
-
-def _get_map_coordinates(header_data: Dict[str, Any]) -> str:
-    """
-    Determina il tipo di operazione e il sistema di coordinate da estrarre
-    basandosi sul valore di SUBSCAN (o una keyword simile).
-
-    Ritorna:
-    - 'RA_DEC': Mappa in coordinate Celesti.
-    - 'EL_AZ': Mappa in coordinate Orizzontali.
-    - 'OTHER': Scansione NON-MAPPA (es. Tracking, Spettro, ecc.).
-    """
-    
-    subscan_type = header_data.get("SUBSCAN") # Assumiamo che "SUBSCAN" sia la chiave corretta
-
-    if subscan_type is None:
-        print("WARNING: Keyword 'SUBSCAN' mancante nell'header. Skippo l'elaborazione.")
-        return "OTHER"
-        
-    # --- 1. CASI NON-MAPPA ---
-    if subscan_type == "TRACKING":
-        # Se � tracking, � un'acquisizione di spettro/pointing, non una mappa
-        return "OTHER" 
-
-    # --- 2. CASI MAPPA (Coordinate Celesti) ---
-    elif subscan_type in ["RA", "DEC"]:
-        # Se la scansione avviene in RA o DEC, usiamo le coordinate celesti.
-        print(f"DEBUG: SUBSCAN � '{subscan_type}'. Scelgo RA/DEC.")
-        return "RA_DEC"
-        
-    # --- 3. CASI MAPPA (Coordinate Orizzontali) ---
-    elif subscan_type in ["AZ", "EL"]:
-        # Se la scansione avviene in AZ o EL, usiamo le coordinate orizzontali.
-        print(f"DEBUG: SUBSCAN � '{subscan_type}'. Scelgo EL/AZ.")
-        return "EL_AZ"
-        
-    # --- 4. FALLBACK ---
-    else:
-        # Qualsiasi altro valore che non � esplicitamente gestito
-        print(f"PROCESSOR: Tipo di scansione '{subscan_type}' non riconosciuto per la mappatura. Skippo.")
-        return "OTHER"
+        # Se is_map era True ma il sub_scan_type � inatteso, 
+        # restituiamo array vuoti per evitare errori di grigliatura.
+        print(f"AVVISO GRAVE: SubScanType '{sub_scan_type}' non gestito per le mappe.")
+        return np.array([]), np.array([])

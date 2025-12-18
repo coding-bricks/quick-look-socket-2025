@@ -359,3 +359,84 @@ def create_map_layout(doc) -> Tuple[Any, Dict[str, Any]]:
     
     return final_layout, doc_state
 
+
+
+
+
+
+
+def create_scatter_layout(doc) -> Tuple[Any, Dict[str, Any]]: 
+    """
+    Crea il layout iniziale per lo Scatter Plot (X, Y, Z) con due Tab (Pol0, Pol1).
+    Supporta l'aggiornamento incrementale tramite streaming.
+    """
+
+    # --- 1. Definizione Mapper Colore ---
+    # Usiamo Magma256 come per la mappa grigliata, ma dedicata allo scatter
+    color_mapper = LinearColorMapper(palette=Magma256, low=0, high=1)
+
+    # --- 2. Inizializzazione ColumnDataSource (VUOTI) ---
+    # Fondamentale: per lo streaming partiamo con liste vuote
+    source_scatter_pol0 = ColumnDataSource(data=dict(x=[], y=[], z=[]))
+    source_scatter_pol1 = ColumnDataSource(data=dict(x=[], y=[], z=[]))
+
+    # --- 3. Creazione Figure ---
+    
+    # Tooltip opzionali per vedere i valori al passaggio del mouse
+    tooltips = [("X", "@x"), ("Y", "@y"), ("Z (Power)", "@z")]
+
+    # Figura Pol0
+    p0 = figure(
+        title="Scatter Plot - Polarizzazione 0",
+        x_axis_label="AZ/RA [rad]", y_axis_label="EL/DEC [rad]",
+        width=600, height=500,
+        active_scroll="wheel_zoom",
+        tooltips=tooltips
+    )
+    # Rendering dei punti (circle)
+    p0.circle(
+        x='x', y='y', size=5,
+        source=source_scatter_pol0,
+        color={'field': 'z', 'transform': color_mapper},
+        line_color=None, # Rimuove il bordo per pulizia visiva
+        legend_label="Punti Pol0"
+    )
+
+    # Figura Pol1
+    p1 = figure(
+        title="Scatter Plot - Polarizzazione 1",
+        x_axis_label="AZ/RA [rad]", y_axis_label="EL/DEC [rad]",
+        width=600, height=500,
+        active_scroll="wheel_zoom",
+        tooltips=tooltips
+    )
+    p1.circle(
+        x='x', y='y', size=5,
+        source=source_scatter_pol1,
+        color={'field': 'z', 'transform': color_mapper},
+        line_color=None,
+        legend_label="Punti Pol1"
+    )
+
+    # --- 4. Elementi Comuni (ColorBar) ---
+    color_bar = ColorBar(color_mapper=color_mapper, location=(0,0), label_standoff=12)
+    p0.add_layout(color_bar, 'right')
+    p1.add_layout(color_bar, 'right')
+
+    # --- 5. Layout a Tab ---
+    tab0 = Panel(child=p0, title="Scatter Pol0")
+    tab1 = Panel(child=p1, title="Scatter Pol1")
+    scatter_tabs = Tabs(tabs=[tab0, tab1])
+
+    final_layout = column(scatter_tabs)
+
+    # --- 6. Stato per BOKEH_DOC_STATE ---
+    doc_state = {
+        'doc': doc,
+        'source_scatter_pol0': source_scatter_pol0,
+        'source_scatter_pol1': source_scatter_pol1,
+        'color_mapper_scatter': color_mapper 
+    }
+
+    return final_layout, doc_state
+

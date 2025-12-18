@@ -3,6 +3,12 @@
 
 # app.py
 
+# Importa il modulo Bokeh Server
+import bokeh_server
+
+# ?? NUOVO IMPORT ??
+from bokeh.embed import server_document
+
 import os
 import state
 import sys # Import sys to access command-line arguments
@@ -85,7 +91,26 @@ def _check_mounted_drives(drive_paths):
 # --- Flask Routes ---
 @app.route('/')
 def index():
-    return render_template('index.html')
+    # 1. Definisci l'URL del server Bokeh (deve corrispondere a quello in bokeh_server.py)
+    bokeh_url = "http://localhost:5006" 
+    
+    # 2. Definisci il percorso dell'applicazione Bokeh (definito in start_bokeh_server)
+    app_path = "/map_viewer" 
+    
+    # 3. Genera il tag script che caricher� il plot dinamicamente
+    # Questo script si collegher� al server Bokeh (5006) per ottenere l'applicazione
+    bokeh_script = server_document(url=bokeh_url + app_path)
+
+   
+    # 4. Passa lo script alla template index.html (solo bokeh_script)
+    return render_template(
+        'index.html', 
+        bokeh_script=bokeh_script
+        # Rimuovi: raw_bokeh_script=bokeh_script
+    )
+   
+   
+    #return render_template('index.html')
 
 # --- SocketIO Event Handlers ---
 @socketio.on('connect')
@@ -190,6 +215,15 @@ def start_app():
     if fits_observer is None: # Check if start_fits_monitor failed (e.g., directory creation failed)
         print("FITS file monitor failed to start. Application will not monitor files.")
         return # Exit if monitor didn't start
+
+    # 7.5. ?? AVVIA IL SERVER BOKEH ??
+    # Usa una porta diversa da Flask (es. 5006, la default nel tuo bokeh_server.py)
+    try:
+        bokeh_server.start_bokeh_server(port=5006, app_name='/map_viewer')
+        print("BOKEH: Server di visualizzazione mappa avviato con successo.")
+    except Exception as e:
+        print(f"ERRORE GRAVE: Impossibile avviare il server Bokeh: {e}")
+        # L'applicazione pu� continuare, ma la mappa non funzioner�.
 
     # 8. Run the Flask-SocketIO server
     socketio.run(app, debug=False, allow_unsafe_werkzeug=True, host='0.0.0.0', port=5000)

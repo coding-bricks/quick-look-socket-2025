@@ -251,6 +251,127 @@ socket.on('fits_header_update', function(data) {
         signalValueDisplay.textContent = data.header.SIGNAL || 'N/A';
         spectrumValueDisplay.textContent = data.spectrum.toUpperCase() || 'N/A';
 
+
+
+
+        // 2. Logica Condizionale:
+
+        if ((data.sub_scan_type === 'TRACKING') && (data.plot_url)) {
+            // --- CASO 1: PLOT STATICO (SPETTRO) ---
+            
+            console.log('Tipo: TRACKING (Spettro). Sostituzione del contenuto HTML con iframe.');
+            
+            // ?? IL TUO CODICE VA QUI ??
+            // Questo � il blocco che genera l'iframe e che deve essere eseguito solo per gli spettri.
+            
+            // ... (Il tuo codice qui) ...
+            
+            fitsPlotContainer.innerHTML = ''; // Clear existing content (e.g., Bokeh plot)
+            const iframe = document.createElement('iframe');
+            // ... (tutta la configurazione iframe) ...
+            iframe.src = data.plot_url; // Usa la variabile corretta
+            iframe.style.display = 'block';
+            iframe.style.width = '96%';
+            iframe.style.height = '560px';
+            iframe.style.border = '0';
+            iframe.style.borderRadius = '8px';
+            iframe.setAttribute('frameborder', '0');
+            iframe.style.margin = '0 auto';
+            
+            fitsPlotContainer.appendChild(iframe);
+            console.log('Iframe appended to container. Plot should now be loading.');
+
+            // ----------------------------------------
+            
+        } else if (data.sub_scan_type !== 'TRACKING') {
+
+            // --- CASO 2: PLOT DINAMICO (MAPPA) ---
+                      
+            // Se non � TRACKING (es. DWELL, RASTER, ecc.), si assume che si stia elaborando una MAPPA.
+            // L'aggiornamento avviene via WebSocket (porta 5006). NON DOBBIAMO TOCCARE L'HTML.
+    
+            console.log(`Tipo: ${data.sub_scan_type} (Mappa). Controllo se � necessario ripristinare l'embedding Bokeh.`);
+            
+            // Controlliamo se il plot Bokeh � gi� caricato
+            // Il plot Bokeh genera una div con una classe specifica, es: 'bk-root' o 'bk-layout-fixed'
+            // Se la classe non c'�, significa che stiamo mostrando il vecchio spettro.
+            
+
+            if (!fitsPlotContainer.querySelector('.bk-root')) { 
+                console.log("Rilevato vecchio plot statico. Reinserimento e forzatura esecuzione del plot Bokeh...");
+            
+                if (window.BOKEH_EMBED_CONTENT) {
+                    // 1. Inserisci solo l'HTML/script grezzo. NON USARE innerHTML qui.
+                    fitsPlotContainer.innerHTML = '';
+                    
+                    // 2. Parsifica l'HTML per estrarre la parte dello script e la parte div
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(window.BOKEH_EMBED_CONTENT, 'text/html');
+                    
+                    const scriptElement = doc.querySelector('script'); // Trova il tag <script> generato da server_document
+                    const divElement = doc.querySelector('div');       // Trova la <div> di ancoraggio
+            
+                    if (divElement) {
+                        // Aggiunge la div di ancoraggio alla pagina
+                        fitsPlotContainer.appendChild(divElement);
+                    }
+            
+                    if (scriptElement) {
+                        // 3. Clona e aggiunge lo script in modo che il browser lo esegua
+                        // Clona lo script e lo aggiunge direttamente al DOM. Questo garantisce l'esecuzione.
+                        const newScript = document.createElement('script');
+                        newScript.textContent = scriptElement.textContent;
+                        
+                        // Copia gli attributi (specialmente se ce ne sono di specifici, anche se di solito non essenziali per server_document)
+                        Array.from(scriptElement.attributes).forEach(attr => {
+                            newScript.setAttribute(attr.name, attr.value);
+                        });
+                        
+                        fitsPlotContainer.appendChild(newScript);
+                        
+                        console.log("Script Bokeh forzato per l'esecuzione. La mappa dovrebbe apparire a breve.");
+            
+                    } else {
+                         console.error("ERRORE: Impossibile trovare lo script Bokeh nell'embedding content.");
+                    }
+                    
+                } else {
+                    console.error("ERRORE: Variabile BOKEH_EMBED_CONTENT non trovata. Impossibile ripristinare la mappa.");
+                }
+            }
+
+
+
+
+
+            /*
+            if (!fitsPlotContainer.querySelector('.bk-root')) { 
+                // Se l'elemento di root di Bokeh non � presente, ricarichiamo l'embedding
+                console.log("Rilevato vecchio plot statico. Reinserimento del plot Bokeh...");
+
+                // ?? RIPRISTINO DELL'HTML BOKEH ??
+                if (window.BOKEH_EMBED_CONTENT) {
+                    // Reinserisce lo script Bokeh originale nel contenitore
+                    fitsPlotContainer.innerHTML = window.BOKEH_EMBED_CONTENT;
+                } else {
+                    console.error("ERRORE: Variabile BOKEH_EMBED_CONTENT non trovata.");
+                }
+                
+            
+                // Non appena l'HTML viene reinserito, il browser esegue lo script, 
+                // stabilisce una nuova connessione WebSocket con la porta 5006 
+                // e carica l'ultima mappa aggiornata.
+            }*/
+            
+            
+        } else {
+            // --- CASO 3: Nessun Plot/Errore ---
+
+            // Nessun URL o tipo non gestito.
+            fitsPlotContainer.innerHTML = '<p class="text-muted">Nessun plot disponibile per questo tipo di scansione o dati mancanti.</p>';
+            console.log('Nessun plot URL fornito o tipo non gestito.');
+        }
+        /*
         // --- Add Bokeh plot display logic ---
         if (data.plot_url) {
             console.log('Plot URL received:', data.plot_url);
@@ -282,7 +403,7 @@ socket.on('fits_header_update', function(data) {
             fitsPlotContainer.innerHTML = '<p class="text-muted">No plot available for this FITS file.</p>';
             console.log('No plot URL provided in the received data.');
         } 
-
+*/
     } else {
 
         console.log(`Skipping file '${data.filename}': Selected feed (${selectedFeed}) does not match any feed in header (${headerFeedString}).`);
