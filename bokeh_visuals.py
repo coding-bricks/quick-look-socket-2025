@@ -388,7 +388,7 @@ def create_scatter_layout(doc) -> Tuple[Any, Dict[str, Any]]:
     # Figura Pol0
     p0 = figure(
         title="Scatter Plot - Polarizzazione 0",
-        x_axis_label="AZ/RA [rad]", y_axis_label="EL/DEC [rad]",
+        x_axis_label="AZ/RA [deg]", y_axis_label="EL/DEC [deg]",
         width=600, height=500,
         active_scroll="wheel_zoom",
         tooltips=tooltips
@@ -405,7 +405,7 @@ def create_scatter_layout(doc) -> Tuple[Any, Dict[str, Any]]:
     # Figura Pol1
     p1 = figure(
         title="Scatter Plot - Polarizzazione 1",
-        x_axis_label="AZ/RA [rad]", y_axis_label="EL/DEC [rad]",
+        x_axis_label="AZ/RA [deg]", y_axis_label="EL/DEC [deg]",
         width=600, height=500,
         active_scroll="wheel_zoom",
         tooltips=tooltips

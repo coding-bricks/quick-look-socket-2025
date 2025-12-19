@@ -274,6 +274,9 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                     x_data, y_data = _extract_coordinates_for_map(hdul, sub_scan_type)
                     print(f"COORDINATE: Tipo {sub_scan_type} estratte con {x_data.size} punti.")
 
+                  
+
+
                     all_pi_data = []
 
                     print(f'Selected feed for mapping: {state.CURRENT_SELECTED_FEED}')
@@ -767,18 +770,21 @@ def update_global_point_cloud_dual_pol(
             
     else:
 
+        x_deg = x_data_new * (180.0 / np.pi)
+        y_deg = y_data_new * (180.0 / np.pi)
+
         try:
             # Prepariamo il pacchetto dati per Bokeh
             # Usiamo i dati "freschi" appena estratti dal file FITS corrente
             scatter_payload = {
                 'Pol0': {
-                    'x': x_data_new.tolist(), 
-                    'y': y_data_new.tolist(), 
+                    'x': x_deg.tolist(), 
+                    'y': y_deg.tolist(), 
                     'z': all_pi_data_new[0].tolist()
                 },
                 'Pol1': {
-                    'x': x_data_new.tolist(), 
-                    'y': y_data_new.tolist(), 
+                    'x': x_deg.tolist(), 
+                    'y': y_deg.tolist(), 
                     'z': all_pi_data_new[1].tolist()
                 }
             }
@@ -861,10 +867,18 @@ def run_gridding_task():
 
 
 def trigger_gridding_process():
+    
+    global gridding_thread
+
+    # --- NUOVO BYPASS ---
+    if getattr(state, 'USE_SCATTER_MODE', True): # valore di default se 'USE_SCATTER_MODE' non è definito in state.py. Più robusto della semplice if
+        # Se siamo in modalit� scatter, non vogliamo attivare il grigliatore.
+        # Lo scatter plot viene gi� aggiornato direttamente nel Worker A.
+        return
+
     """
     Avvia il grigliamento in un thread separato se non c'� gi� un processo attivo.
     """
-    global gridding_thread
     
     # Controlla se il thread precedente � terminato o non � mai partito
     if gridding_thread is None or not gridding_thread.is_alive():
