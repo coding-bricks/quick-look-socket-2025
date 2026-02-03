@@ -1,150 +1,120 @@
 # fits_watcher.py
 
 import os
-import re # Import the regular expression module
+import re
 import threading
-# Import PollingObserver specifically for more reliable monitoring on network/remote drives
+import time
+# PollingObserver is used for more reliable monitoring on network/remote drives (NFS/Lustre)
 from watchdog.observers.polling import PollingObserver
 from watchdog.events import FileSystemEventHandler
-import time
 
-# Import the processing functions from the fits_processor.py file
+# Import processing logic from the fits_processor module
 from fits_processor import process_fits_file, set_socketio_instance_for_processor
 
-# Global variable to hold the directory to monitor.
-# It's initialized to a default, but can be updated by set_monitor_directory.
-MONITOR_DIRECTORY = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fits_files_default') # Changed to 'default'
+# Global list to hold multiple monitoring paths
+MONITOR_DIRECTORIES = [] 
 
-# --- NEW: Use a regex pattern for FITS extensions ---
-# This regex matches:
-# - '.fits' (literally)
-# - OR '.fits' followed by one or more digits (e.g., .fits0, .fits12, .fits999)
-# The re.IGNORECASE flag makes the match case-insensitive (e.g., .FITS, .FiTs10)
-
+# Regex pattern for FITS extensions (matches .fits, .fits0, .fits12, etc.)
+# The re.IGNORECASE flag makes the match case-insensitive
 FITS_EXTENSION_PATTERN = re.compile(r'\.fits(\d+)?$', re.IGNORECASE)
 
-
-# Define subfolders to be explicitly excluded from processing, case-insensitive
+# Subfolders explicitly excluded from processing
 EXCLUDED_SUBFOLDERS = {'tempfits', 'tmp'}
 
-# Global variable to hold the SocketIO instance, to be set by app.py
+# Global variable to hold the SocketIO instance
 _socketio_instance = None
 
-# Set to store paths of files that are currently being processed or have been queued for processing.
-# This helps prevent duplicate processing if watchdog triggers multiple events for the same file.
+# Set and lock to handle thread-safe duplicate file detection
 _processing_files = set()
-_processing_lock = threading.Lock() # To ensure thread-safe access to _processing_files
+_processing_lock = threading.Lock()
 
 
-def set_monitor_directory(path):
+def set_monitor_directories(paths):
     """
-    Sets the directory that the FITS file watcher should monitor.
-    This function allows app.py to dynamically configure the monitoring path.
+    Sets the list of directories that the FITS file watcher should monitor.
+    This function allows app.py to dynamically configure multiple monitoring paths.
 
     Args:
-        path (str): The absolute path to the directory to monitor.
+        paths (list): A list of absolute paths to monitor.
     """
-    global MONITOR_DIRECTORY
-    MONITOR_DIRECTORY = os.path.abspath(path) # Ensure it's an absolute path
-    print(f"Monitor directory set to: {MONITOR_DIRECTORY}")
-
+    global MONITOR_DIRECTORIES
+    MONITOR_DIRECTORIES = [os.path.abspath(p) for p in paths]
+    for p in MONITOR_DIRECTORIES:
+        print(f"ICHNOS: Added to monitor list: {p}")
 
 
 def set_socketio_instance(sio):
     """
-    Sets the SocketIO instance for fits_watcher.py and passes it
-    to fits_processor.py. This function is called by app.py.
-
-    Args:
-        sio (SocketIO): The Flask-SocketIO instance from app.py.
+    Sets the SocketIO instance and passes it to the processor module.
     """
     global _socketio_instance
     _socketio_instance = sio
-    set_socketio_instance_for_processor(sio) # Pass it down to the processor module
-    print("SocketIO instance passed to fits_watcher.py (and fits_processor.py)")
+    set_socketio_instance_for_processor(sio)
+    print("SocketIO instance synchronized in fits_watcher.py")
 
 
 class FitsFileHandler(FileSystemEventHandler):
     """
-    Custom event handler for watchdog. It monitors the specified directory
-    for new .fits files and triggers their processing via fits_processor.py.
+    Custom watchdog event handler to monitor directories for new FITS files.
     """
     def on_created(self, event):
-        """
-        Called when a new file or directory is created.
-        We only care about files ending with the defined FITS extensions,
-        whose filenames do not start with 'Sum', and which are not located
-        in excluded temporary subfolders ('tempfits', 'tmp').
-
-        Args:
-            event (FileSystemEvent): The event object representing the file system change.
-        """
-
         if event.is_directory:
-            return # Ignore directory creation events
+            return 
 
         filepath = event.src_path
         filename_base = os.path.basename(filepath)
-        lower_filename_base = filename_base.lower() # Convert to lowercase once for multiple checks
+        lower_filename_base = filename_base.lower()
 
-        # 1. Check if the file ends with any of the defined FITS extensions using regex
-        # This will match '.fits', '.fits0', '.fits123', etc. (case-insensitive)
-        if not FITS_EXTENSION_PATTERN.search(filename_base): # Search in original case for filename_base
-            print(f"File '{filename_base}' skipped: Not a recognized FITS extension.") # Optional: uncomment for verbose logging
-            return # Not a FITS file, ignore
+        # 1. Extension check using Regex
+        if not FITS_EXTENSION_PATTERN.search(filename_base):
+            return 
 
-        # 2. Exclude files whose filename starts with 'Sum', 'Sum_', or 'summary' (case-insensitive)
-        if lower_filename_base.startswith('sum') or \
-           lower_filename_base.startswith('sum_') or \
-           lower_filename_base.startswith('summary'):
-            print(f"File '{filename_base}' skipped: Filename starts with 'Sum', 'Sum_', or 'summary'.")
-            return # Ignore this file
+        # 2. Exclude summary or cumulative files
+        if lower_filename_base.startswith(('sum', 'sum_', 'summary')):
+            print(f"File '{filename_base}' skipped: Starts with 'Sum' or 'summary'.")
+            return 
        
-        # 3. Exclude files located in specified temporary subfolders ('tempfits', 'tmp')
-        file_dir = os.path.dirname(filepath)
-        # Normalize paths for consistent comparison across operating systems
-        norm_monitor_dir = os.path.normpath(MONITOR_DIRECTORY)
-        norm_file_dir = os.path.normpath(file_dir)
+        # 3. Dynamic subfolder exclusion check across all monitored roots
+        file_dir = os.path.normpath(os.path.dirname(filepath))
+        is_excluded = False
+        
+        for root_dir in MONITOR_DIRECTORIES:
+            norm_root = os.path.normpath(root_dir)
+            # Check if the file belongs to this specific root directory
+            if file_dir.startswith(norm_root):
+                # Calculate relative path to identify subfolder names
+                relative_path = os.path.relpath(file_dir, norm_root)
+                path_components = {c.lower() for c in relative_path.split(os.sep) if c}
+                
+                # Skip the file if it is located in an excluded subfolder (e.g., 'tmp')
+                if EXCLUDED_SUBFOLDERS.intersection(path_components):
+                    is_excluded = True
+                    break
+        
+        if is_excluded:
+            print(f"Skipping file '{filename_base}': Located in excluded folder.")
+            return
 
-        # Ensure the file's directory is actually within the monitored directory (or is it)
-        if norm_file_dir.startswith(norm_monitor_dir):
-            # Get the path components relative to the monitor directory
-            relative_path = os.path.relpath(norm_file_dir, norm_monitor_dir)
-            # Split the relative path into individual folder names
-            path_components = {comp.lower() for comp in relative_path.split(os.sep) if comp} # Convert to set of lowercase components
-
-            # Check if any component matches an excluded subfolder
-            if len(EXCLUDED_SUBFOLDERS.intersection(path_components)) > 0:
-                print(f"File '{filename_base}' skipped: Located in an excluded temporary subfolder ({filepath}).")
-                return # Ignore this file
-
-        # If all checks pass, proceed with processing
+        # 4. Thread-safe duplicate check
         with _processing_lock:
             if filepath in _processing_files:
-                print(f"File {os.path.basename(filepath)} is already being processed or was processed. Skipping duplicate event.")
+                print(f"File {filename_base} is already being processed. Skipping duplicate event.")
                 return
             _processing_files.add(filepath)
 
-        print(f"\n--- Detected new FITS file: {os.path.basename(filepath)} ---")
+        print(f"\n--- [ICHNOS] Detected new FITS file: {filename_base} ---")
 
-
-
+        # Launch processing in a separate thread to keep the watcher responsive
         threading.Thread(target=self._safe_process_file, args=(filepath,)).start()
 
 
     def _safe_process_file(self, filepath):
         """
-        A wrapper function to call `process_fits_file` and ensure that the file's path
-        is removed from the `_processing_files` set after processing is complete,
-        regardless of whether the processing succeeded or failed.
-
-        Args:
-            filepath (str): The path to the file being processed.
+        Wrapper to ensure file is removed from the processing set regardless of success/failure.
         """
         try:
             process_fits_file(filepath)
         finally:
-            # Ensure the file is removed from the processing set in a thread-safe manner.
             with _processing_lock:
                 if filepath in _processing_files:
                     _processing_files.remove(filepath)
@@ -153,34 +123,35 @@ class FitsFileHandler(FileSystemEventHandler):
 
 def start_fits_monitor():
     """
-    Initializes and starts the watchdog PollingObserver for FITS files.
-    This observer periodically scans the directory, making it more reliable
-    for monitoring network-mounted or remote drives where native OS events
-    might not be consistently propagated.
-
-    Returns:
-        PollingObserver: The watchdog PollingObserver instance, which can be
-                         used to stop the monitoring gracefully.
+    Starts the PollingObserver for all directories in MONITOR_DIRECTORIES.
+    Polling is preferred for network-mounted drives (NFS/Lustre).
     """
+    if not MONITOR_DIRECTORIES:
+        print("Error: MONITOR_DIRECTORIES list is empty. Monitoring cannot start.")
+        return None
+
     event_handler = FitsFileHandler()
-    # Use PollingObserver for robust monitoring, especially on network drives.
-    # The 'interval' parameter (in seconds) defines how often the directory is scanned.
-    # Adjust this value based on your needs for responsiveness vs. system resource usage.
-    observer = PollingObserver(1) # Example: polls every 5 seconds
-    # Schedule the event handler to monitor the directory non-recursively (only direct files).
-    observer.schedule(event_handler, MONITOR_DIRECTORY, recursive=True)
-    observer.start() # Start the observer thread.
-    print(f"FITS file monitor started for directory: {MONITOR_DIRECTORY}")
+    
+    # Scans directories every 1 second (interval can be adjusted)
+    observer = PollingObserver(1) 
+    
+    # Schedule each valid directory for monitoring
+    for directory in MONITOR_DIRECTORIES:
+        if os.path.isdir(directory):
+            observer.schedule(event_handler, directory, recursive=True)
+        else:
+            print(f"Warning: Directory not found, skipping: {directory}")
+    
+    observer.start()
+    print(f"FITS file monitor started for {len(MONITOR_DIRECTORIES)} paths.")
     return observer
+
 
 def stop_fits_monitor(observer):
     """
-    Stops the watchdog observer gracefully.
-
-    Args:
-        observer (Observer): The watchdog Observer instance returned by `start_fits_monitor`.
+    Stops the observer thread gracefully.
     """
     if observer:
-        observer.stop() # Stop the observer thread.
-        observer.join() # Wait for the observer thread to terminate.
+        observer.stop()
+        observer.join()
         print("FITS file monitor stopped.")

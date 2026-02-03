@@ -589,6 +589,11 @@ def process_skarab_nodding_pair(filepaths_tuple, common_prefix, feed_A_id, feed_
     if len(final_averages) != expected_lines:
          print(f"Errore di unificazione Nodding: attese {expected_lines} linee, trovate {len(final_averages)}.")
          return
+
+    # Extract data from primary header for upper x-axis
+    freq = primary_header_data["frequency"]
+    lo =  primary_header_data["lo"] 
+    bw = primary_header_data["bandwidth"]
          
     # 5. GENERAZIONE PLOT (Contiene i Timer 2 e 3)
     # L'argomento start_time_total viene usato qui per calcolare il tempo totale finale
@@ -600,7 +605,10 @@ def process_skarab_nodding_pair(filepaths_tuple, common_prefix, feed_A_id, feed_
         feeds_for_legend, 
         spectrum_type,
         result_A['x_axis_label_val'],
-        start_time_total 
+        start_time_total,
+        freq,
+        lo,
+        bw
     )
 
 

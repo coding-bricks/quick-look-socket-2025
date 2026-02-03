@@ -31,23 +31,65 @@ from typing import Dict, Any, Tuple
 
 
 def _plot_and_save_skarab_nodding_html(plot_save_dir, 
-    filename_prefix, final_averages, x, feeds_for_legend, spectrum_type, x_axis_label_val, start_time_total):
+    filename_prefix, final_averages, x, feeds_for_legend, spectrum_type, x_axis_label_val, start_time_total, freq, lo, bw):
     
     start_time_bokeh_build = time.time()
+
+    f_min = float(freq)
+    f_max = float(f_min) + float(bw) 
+
+    # print(freq, lo, bw, f_min, f_max)
     
     try:
         # Inizializzazione figures
         if spectrum_type == 'stokes':
             p0 = figure(title=f"SKARAB Nodding: {filename_prefix} - POL [STOKES]", x_axis_label=x_axis_label_val, y_axis_label='Counts', width=740, height=500, tools="pan,wheel_zoom,box_zoom,reset")
             figures = [p0]
+
+            # Create the upper X-Axis expressed in frequency
+            p0.extra_x_ranges = {
+                "freq_range": Range1d(start=f_min, end=f_max)
+            }
+            p0.add_layout(
+                LinearAxis(
+                    x_range_name="freq_range",
+                    axis_label="Frequency (MHz)"
+                ),
+                "above"
+            )
         else:
             p1 = figure(title=f"SKARAB Nodding: {filename_prefix} - POL [LEFT]", x_axis_label=x_axis_label_val, y_axis_label='Counts', width=740, height=250, tools="pan,wheel_zoom,box_zoom,reset")
             p2 = figure(title=f"SKARAB Nodding: {filename_prefix} - POL [RIGHT]", x_axis_label=x_axis_label_val, y_axis_label='Counts', width=740, height=250, tools="pan,wheel_zoom,box_zoom,reset")
             figures = [p1, p2]
 
+            # Create the upper X-Axis expressed in frequency
+            p1.extra_x_ranges = {
+                "freq_range": Range1d(start=f_min, end=f_max)
+            }
+            p1.add_layout(
+                LinearAxis(
+                    x_range_name="freq_range",
+                    axis_label="Frequency (MHz)"
+                ),
+                "above"
+            )
+
+            p2.extra_x_ranges = {
+                "freq_range": Range1d(start=f_min, end=f_max)
+            }
+            p2.add_layout(
+                LinearAxis(
+                    x_range_name="freq_range",
+                    axis_label="Frequency (MHz)"
+                ),
+                "above"
+            )
+
 
         n = len(final_averages)
         colors = Category10[n] if n <= 10 else ["black"] * n # Gestione colori
+
+       
 
         # Aggiunta delle linee (Logica di Nodding)
         if spectrum_type in ['spectra', 'simple']:
