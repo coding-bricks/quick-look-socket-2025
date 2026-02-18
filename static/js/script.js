@@ -6,8 +6,8 @@ function clearData() {
 
     headerFilenameDisplay.textContent = 'N/A';
     sourceValueDisplay.textContent = 'N/A';
-    raRadDisplay.textContent = 'N/A';
-    decRadDisplay.textContent = 'N/A';
+    raDisplay.textContent = 'N/A';
+    decDisplay.textContent = 'N/A';
     loMHzDisplay.textContent = 'N/A';
     bwMHzDisplay.textContent = 'N/A';
     scanNumDisplay.textContent = 'N/A';
@@ -17,7 +17,7 @@ function clearData() {
     bandDisplay.textContent = 'N/A';
     backendDisplay.textContent = 'N/A';
     signalValueDisplay.textContent = 'N/A';
-    spectrumValueDisplay.textContent = 'N/A';
+    modeDisplay.textContent = 'N/A';
     fitsPlotContainer.innerHTML = '<p class="text-muted">Waiting for a FITS file to be processed...</p>';
 }
 
@@ -238,8 +238,8 @@ socket.on('fits_header_update', function(data) {
         // --- Update Header Info Display ---
         //headerFilenameDisplay.textContent = data.filename || 'N/A';
         sourceValueDisplay.textContent = data.header.SOURCE || 'N/A';
-        raRadDisplay.textContent = data.header.RightAscension || 'N/A';
-        decRadDisplay.textContent = data.header.Declination || 'N/A';
+        raDisplay.textContent = data.header.RightAscension || 'N/A';
+        decDisplay.textContent = data.header.Declination || 'N/A';
         loMHzDisplay.textContent = data.lo || 'N/A';
         bwMHzDisplay.textContent = data.bandwidth || 'N/A';
         scanNumDisplay.textContent = data.header.SCANID || 'N/A';
@@ -249,7 +249,7 @@ socket.on('fits_header_update', function(data) {
         bandDisplay.textContent = data.header['Receiver Code'] || 'N/A';
         backendDisplay.textContent = data.backend || 'N/A';
         signalValueDisplay.textContent = data.header.SIGNAL || 'N/A';
-        spectrumValueDisplay.textContent = data.spectrum.toUpperCase() || 'N/A';
+        modeDisplay.textContent = data.mode.toUpperCase() || 'N/A';
 
 
 

@@ -119,8 +119,10 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
     start_time_total = time.time()
     print(f"\n--- PROFILING INIZIATO: {filename_prefix} ---")
 
-    data = [] 
+    data = []
+    data_map_stokes = [] 
     averages = []
+    averages_stokes = []
 
     feed_number = 0 # default value for multi-feed
     
@@ -155,7 +157,7 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                     else: # case STOKES
                         data.append(np.array(hdul["DATA TABLE"].data[f"Ch0"]))
             
-            else: # case .fits# i.e. multi-feed (SARDARA only)
+            else: # case .fits# i.e. multi-feed (SARDARA only, possibily SKARAB but not TotalPower which has one feed only)
                 
                 # ... (Logica di estrazione SARDARA multi-feed .fits#) ...
                 feed_number = filename_extension.removeprefix('.fits')
@@ -166,10 +168,23 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                     index = (int(feed_number)*2)+1
                     data.append(np.array(hdul["DATA TABLE"].data[f"Ch{index}"]))
                 
-                else:
+                else: # case Stokes
                     
-                    data.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"]))
-
+                    # If we want to generate Maps with Stokes data we need to split the data into 4 chunks (polarizations LL, RR, RL, LR)
+                    # Stokes data are stored in a single 1024 channels spectra -> [0:255][256:511][512:767][768:1023]
+                    # Then we can add the RR and LL data
+                    data.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][:, 0:1024]))
+                    data.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][:, 1024:2048]))
+                    data.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][:, 2048:3072]))
+                    data.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][:, 3072:4096]))
+                    
+                    
+                    #data_map_stokes.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][:, 0:1024]))
+                    #data_map_stokes.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][:, 1024:2048]))
+                    #data_map_stokes.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][:, 2048:3072]))
+                    #data_map_stokes.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][:, 3072:4096]))
+                    #data.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][0:256]))
+                    #data.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][256:512]))
             
             # Get the hpbw for grid mapping    
             hpbw_arcsec = calculate_hpbw(float(freq), 64, k_factor=1.22)
@@ -184,10 +199,29 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
             is_map = is_map_by_keyword(sub_scan_type)
             print(f'FITS file relative to a map: {is_map}')
 
+            # -------------------------------------------------------------------
+            # ?? Update of the GLOBAL STATE of the COORDINATE SYSTEM ??
+            # -------------------------------------------------------------------
+      
+            if sub_scan_type == 'RA' or sub_scan_type == 'DEC':
+
+                state.CURRENT_COORD_SYSTEM = "AZEL"
+            else:
+                state.CURRENT_COORD_SYSTEM = "RADEC"
+
+            # Update the spectrum type i.e. 'simple', 'spectra', 'stokes'
+            state.SPECTRUM_TYPE = spectrum_type
 
             if data:
 
                 if not is_map:
+
+                    state.IS_MAP = False
+
+                    # Reset dell'asse X e dei dati dello spettro per la nuova mappa
+                    state.LAST_SPECTRUM_X = np.array([])
+                    state.LAST_SPECTRUM_POL0 = np.array([])
+                    state.LAST_SPECTRUM_POL1 = np.array([])
 
                     # ----------------------------------------------------
                     # ?? QUI INSERIAMO LA LOGICA DI RESET ??
@@ -232,6 +266,46 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                         x = np.linspace(0, len(averages[0]), len(averages[0]))
                         x_axis_label_val = 'Sampling Point'
 
+                    # Calcolo frequenze per l'asse superiore
+                    f_min_val = float(freq)
+                    f_max_val = f_min_val + float(bw)
+
+                    # Caricamento nel dizionario condiviso
+                    state.CURRENT_SPEC.update({
+                        'x': x,               # Canali (0..65535)
+                        'averages': averages, # Lista di array delle polarizzazioni
+                        'f_min': f_min_val,   # Inizio banda MHz
+                        'f_max': f_max_val,   # Fine banda MHz
+                        'filename': filename_prefix,
+                        'legend_labels': [f"Feed {f}" for f in feeds],
+                        'spectrum_type': spectrum_type,
+                        'updated': True       # Notifica il server
+                    })
+
+                    if spectrum_type == 'spectra':
+                        state.CURRENT_SPEC['tab_labels'] = ["LEFT (LCP)", "RIGHT (RCP)"]
+                    elif spectrum_type == 'stokes':
+                        state.CURRENT_SPEC['tab_labels'] = ["Stokes I", "Stokes Q", "Stokes U", "Stokes V"]
+
+                    state.CURRENT_SPEC['updated'] = True
+
+                    # --- DEBUG CHECK ---
+                    print("--- [DEBUG DIZIONARIO STATE] ---")
+                    print(f"Titolo: {state.CURRENT_SPEC['filename']}")
+                    print(f"Tipo Spettro: {state.CURRENT_SPEC['spectrum_type']}")
+                    print(f"Tab Labels: {state.CURRENT_SPEC['tab_labels']}")
+                    print(f"Legend Labels: {state.CURRENT_SPEC['legend_labels']}")
+                    print(f"Frequenze: {state.CURRENT_SPEC['f_min']} MHz - {state.CURRENT_SPEC['f_max']} MHz")
+
+                    # Verifica i dati numerici
+                    n_array = len(state.CURRENT_SPEC['averages'])
+                    print(f"Numero di array (polarizzazioni/feed): {n_array}")
+                    if n_array > 0:
+                        print(f"Lunghezza primo array: {len(state.CURRENT_SPEC['averages'][0])} canali")
+                        print(f"Primi 5 valori primo array: {state.CURRENT_SPEC['averages'][0][:5]}")
+
+                    print("---------------------------------")
+
                     # ----------------------------------------------------------------------
                     # TIMER 1: Tempo di I/O Disco (fits.open/hdul.data) e Calcolo Media (np.mean)
                     end_time_io_calc = time.time()
@@ -241,6 +315,8 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                         backend, x_axis_label_val, x, averages, feed_number, start_time_total, freq, lo, bw)
 
                 else: # is a map
+
+                    state.IS_MAP = True
 
                     # If the subscan number is smaller or equal than that stored in the state.py
                     # the map is re-initialized
@@ -255,6 +331,45 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                         if state.USE_SCATTER_MODE:
                             reset_scatter_plot()
 
+                        # Reset dell'asse X e dei dati dello spettro per la nuova mappa
+                        state.LAST_SPECTRUM_X = np.array([])
+                        state.LAST_SPECTRUM_POL0 = np.array([])
+                        state.LAST_SPECTRUM_POL1 = np.array([])
+
+                    # --- GENERAZIONE ASSE X (FREQUENZE) ---
+                    # The X AXIS is generated only once
+                    # Supponendo che tu abbia estratto freq (f_iniziale) e bw (larghezza banda) dall'header
+                    # e che 'chs' sia il numero di canali (es. 1024)
+
+                    
+                
+                    if(spectrum_type == 'stokes'):
+
+                        chs_pol = data[0].shape[1]
+
+                    else:
+
+                        chs_pol = chs
+
+                    # change the x-axis values dynamically. If spectrum_type == 'simple' i.e. TotalPower use chs for the x axis 
+                    if(spectrum_type == 'simple'): # TotalPower
+
+                        chs_pol = len(data[0])
+                        print('simple - chs_pol', chs_pol)
+                        # Creiamo l'array lineare in numero di canali
+                        state.LAST_SPECTRUM_X = np.linspace(0, chs_pol, chs_pol)
+
+                    else:
+
+                        if state.LAST_SPECTRUM_X.size == 0:  # Lo calcoliamo solo se non � gi� presente
+
+                            f_start = float(freq)
+                            f_end = f_start + float(bw)
+                        
+                            print('chs_pol', chs_pol)
+                            # Creiamo l'array lineare dei MHz per ogni canale
+                            state.LAST_SPECTRUM_X = np.linspace(f_start, f_end, chs_pol)
+                    
 
                     # ----------------------------------------------------
                     # CASO 2: MAPPA (Media Orizzontale)
@@ -274,16 +389,13 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                     x_data, y_data = _extract_coordinates_for_map(hdul, sub_scan_type)
                     print(f"COORDINATE: Tipo {sub_scan_type} estratte con {x_data.size} punti.")
 
-                  
-
-
                     all_pi_data = []
 
                     print(f'Selected feed for mapping: {state.CURRENT_SELECTED_FEED}')
 
                     # The next condition discriminates for single point data (i.e. TP) or array data (i.e. SARDARA, SKARAB)
                     if(type(data[0][0]) == np.ndarray): # case SARDARA, SKARAB
-
+       
                         for i in range(len(data)):
                             # Esegui la media orizzontale (lungo i canali)
                             pi_data = np.nanmean(data[i], axis=1) # <--- MEDIA ORIZZONTALE (Potenza P_i)
@@ -292,7 +404,14 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                             # di quel file, ma tipicamente per la mappa userai SOLO il primo set.
                             averages.append(pi_data) 
                             all_pi_data.append(pi_data) # Raccogli tutti i P_i per i metadata
-
+                    
+                        # For spectrum_type == 'stokes' we would need to add also data[2] and data[3]
+                        state.LAST_SPECTRUM_POL0 = np.nanmean(data[0], axis=0)
+                        state.LAST_SPECTRUM_POL1 = np.nanmean(data[1], axis=0)
+                        
+                        # Una volta calcolati entrambi, segnaliamo a Bokeh che pu� aggiornare
+                        state.SPECTRUM_UPDATED = True
+                
                     else:
 
                         # Here we need to filter data only for the selected feed
@@ -304,7 +423,13 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                         all_pi_data.append(data[state.CURRENT_SELECTED_FEED]) # Raccogli tutti i P_i per i metadata
                         all_pi_data.append(data[state.CURRENT_SELECTED_FEED+1]) # Raccogli tutti i P_i per i metadata
 
-   
+                        # For spectrum_type == 'stokes' we would need to add also data[2] and data[3]
+                        state.LAST_SPECTRUM_POL0 = data[0]
+                        state.LAST_SPECTRUM_POL1 = data[1]
+                                                
+                        # Una volta calcolati entrambi, segnaliamo a Bokeh che pu� aggiornare
+                        state.SPECTRUM_UPDATED = True
+
                     # L'asse X in questo caso non � il canale, ma il Punto Campione (la riga)
                     # Questi P_i verranno poi accoppiati con RA/DEC.
                     x = np.linspace(0, len(averages[0]), len(averages[0]))
@@ -314,7 +439,7 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
 
                     if len(all_pi_data) >= 2:
                         print("Rilevati dati per due polarizzazioni. Inizio aggiornamento Dual-Pol.")
-                        
+
                         # CHIAMATA ESECUTIVA
                         update_global_point_cloud_dual_pol(
                             x_data_new=x_data, 
@@ -723,8 +848,8 @@ def update_global_point_cloud_dual_pol(
     all_pi_data_new: List[np.ndarray]
 ) -> None:
 
-
     if(state.USE_SCATTER_MODE != True):
+
 
         """
         Aggiorna due Nuvole di Punti (Pol0 e Pol1) all'interno dello stato globale (state.py) 
@@ -796,6 +921,8 @@ def update_global_point_cloud_dual_pol(
                     'z': all_pi_data_new[1].tolist()
                 }
             }
+
+
             # Invio asincrono a Bokeh
             update_scatter_plot(scatter_payload)
         except Exception as e:
@@ -917,19 +1044,25 @@ def extract_metadata_and_filter(filepath: str, hdul: fits.HDUList) -> tuple[Dict
     header = hdul[0].header
     filename = os.path.basename(filepath)
     filename_extension = os.path.splitext(filename)[1]
-    
+
+    # Recuperiamo il valore grezzo e portiamolo in maiuscolo per il confronto
+    raw_spectrum = str(hdul["SECTION TABLE"].data["type"][0]).upper()
+
+    # Applichiamo la logica: FULL se STOKES, altrimenti DUAL
+    polarization_value = "FULL" if raw_spectrum == "STOKES" else "DUAL"
+
     header_data = {
         "filename": filename,
         "filename_extension": filename_extension,
-        "header": {}, # Per keyword generiche
-        "feeds": "[]", # Stringa di tutti i feed (es. "[0,1,2]")
-        "acq_type": "UNKNOWN", # MONO, DUAL, MULTI
-        "backend": "UNKNOWN", # TotalPower, SKARAB, SARDARA
-        "feeds_relative_to_file": [], # I feed i cui dati sono effettivamente in questo file
-        "spectrum": hdul["SECTION TABLE"].data["type"][0]
+        "header": {}, 
+        "feeds": "[]", 
+        "acq_type": "UNKNOWN", 
+        "backend": "UNKNOWN", 
+        "feeds_relative_to_file": [],
+        "mode": polarization_value, # conterrà FULL o DUAL 
+        "spectrum": str(hdul["SECTION TABLE"].data["type"][0]) # conterrà 'simple', 'spectra', 'stokes'
     }
-
-     
+         
     # STEP 0  - get the number of feeds used during the acquisition. This allows to check the type of acquisition:
     #   1 feed  - mono feed (as in the position switching)
     #   2 feeds - dual feed (as in the nodding mode)
@@ -1032,12 +1165,41 @@ def extract_metadata_and_filter(filepath: str, hdul: fits.HDUList) -> tuple[Dict
         
         print(f"PROCESSOR FILTER: File discarded: {filename}. Selected Feed ({selected_feed_str}) not found in those listed in the fits file ({acq_feeds_str}).")
         return None, False # File will not be processed
-        
-      
+    
     for keyword, value in header.items():
         if keyword not in ['COMMENT', 'HISTORY']:
-            print(f"{keyword}: {value}")
-            header_data["header"][keyword] = str(value)
+            # 1. Conserviamo il valore originale per le conversioni
+            processed_value = str(value)
+
+            # 2. Intercettiamo le keyword astronomiche
+            if keyword == 'RightAscension':
+                # Passiamo il float alla funzione e otteniamo la stringa nobile
+                processed_value = rad_to_hms_string(float(value))
+            
+            elif keyword == 'Declination':
+                # Passiamo il float alla funzione e otteniamo la stringa nobile
+                processed_value = rad_to_dms_string(float(value))
+
+        # 3. Salviamo nel dizionario
+        header_data["header"][keyword] = processed_value
+        print(f"{keyword}: {processed_value}")
+
+    # Leggi la sorgente dal FITS attuale
+    schedule_name = header_data["header"]["ScheduleName"]
+
+    # CONFRONTO: se la sorgente � diversa da quella salvata in state...
+    if  schedule_name != state.CURRENT_SCHEDULE:
+        state.CURRENT_SCHEDULE = schedule_name  # Aggiorna lo stato con la nuova
+        state.IS_NEW_DATASET = True              # Alza il flag per Bokeh
+        print(f"PROCESSOR: Cambio sorgente rilevato -> {schedule_name}")
+    else:
+        # Se � uguale, assicuriamoci che il flag sia False (importante!)
+        state.IS_NEW_DATASET = False
+      
+    #for keyword, value in header.items():
+    #    if keyword not in ['COMMENT', 'HISTORY']:
+    #        print(f"{keyword}: {value}")
+    #        header_data["header"][keyword] = str(value)
 
     print("--------------------------------------------------\n")
 
@@ -1083,3 +1245,40 @@ def _extract_coordinates_for_map(hdul, sub_scan_type) -> Tuple[np.ndarray, np.nd
         # restituiamo array vuoti per evitare errori di grigliatura.
         print(f"AVVISO GRAVE: SubScanType '{sub_scan_type}' non gestito per le mappe.")
         return np.array([]), np.array([])
+
+
+
+def rad_to_hms_string(rad):
+    """Converte radianti in stringa HHh MMm SSs (per RA)"""
+    if rad is None or np.isnan(rad): return "--"
+    
+    # Normalizza tra 0 e 2pi
+    rad = rad % (2 * np.pi)
+    # Converti in ore decimali (2pi rad = 24h)
+    hours_dec = rad * (12.0 / np.pi)
+    
+    h = int(hours_dec)
+    m = int((hours_dec - h) * 60)
+    s = (hours_dec - h - m/60) * 3600
+    
+    return f"{h:02d}h {m:02d}m {s:05.2f}s"
+
+
+
+def rad_to_dms_string(rad):
+    """Converte radianti in stringa �DD� MM' SS" (per DEC, AZ, EL)"""
+    if rad is None or np.isnan(rad): return "--"
+    
+    # Converti in gradi decimali
+    deg_dec = np.degrees(rad)
+    
+    sign = "+" if deg_dec >= 0 else "-"
+    deg_dec = abs(deg_dec)
+    
+    d = int(deg_dec)
+    m = int((deg_dec - d) * 60)
+    s = (deg_dec - d - m/60) * 3600
+    
+    # Usiamo \u00b0 per il simbolo del grado (sicurezza encoding)
+    return f"{sign}{d:02d}\u00b0 {m:02d}' {s:05.2f}\""
+  

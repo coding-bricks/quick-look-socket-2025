@@ -4,15 +4,17 @@ import threading
 from bokeh.plotting import curdoc
 from bokeh.application import Application
 from bokeh.application.handlers.function import FunctionHandler
+from bokeh.palettes import Category10
 from bokeh.server.server import Server
 import numpy as np # Importa NumPy
 from typing import Dict, Any, List, Optional
 from threading import Thread
+from bokeh.models import Panel
 
 # Importa i tuoi moduli: stato globale, visualizzazioni e Worker B
 import state
 # Importa la funzione di creazione del plot iniziale (es. da bokeh_visuals.py)
-from bokeh_visuals import create_map_layout, create_scatter_layout
+from bokeh_visuals import create_map_layout, create_scatter_layout, create_spectrum_layout
 
 # Variabili Globali per la Gestione del Server
 server: Optional[Server] = None
@@ -23,31 +25,135 @@ server_thread: Optional[Thread] = None
 # 1. FUNZIONE PRINCIPALE DEL DOCUMENTO BOKEH (chiamata una volta all'avvio)
 # ----------------------------------------------------------------------
 
-def modify_doc(doc):
-    """
-    Funzione eseguita dal Server Bokeh per popolare il documento (curdoc()).
-    Qui si crea la struttura iniziale (figure, source) e si salvano i riferimenti.
-    """
-    
-    # 1. Creazione degli elementi Bokeh iniziali (figure, sources, color_mapper)
+def map_app(doc):
+    """Questa � l'applicazione per le mappe (quella che avevi in modify_doc)"""
     if state.USE_SCATTER_MODE:
         layout_obj, doc_state = create_scatter_layout(doc)
     else:
         layout_obj, doc_state = create_map_layout(doc)
-
-
-
-    #layout_obj, doc_state = create_map_layout(doc)
     
-    # 2. Salva gli oggetti Bokeh nello stato globale per l'aggiornamento
-    # state.BOKEH_DOC_STATE viene popolato con {'doc': doc, 'source_pol0': ..., ...}
     state.BOKEH_DOC_STATE = doc_state
-    
-    # 3. Aggiunge il layout al documento
     doc.add_root(layout_obj)
 
-   
-  
+
+
+def spec_app(doc):
+    """Applicazione dedicata al monitoraggio dello SPETTRO (Real-time)."""
+    # 1. Inizializza il layout (Tabs, Figure, Sorgenti)
+    layout, doc_state = create_spectrum_layout(doc)
+    
+    # 2. Salva i riferimenti nello stato specifico per lo spettro
+    state.SPEC_DOC_STATE = doc_state 
+    
+    # 3. Aggiunge il layout al documento
+    doc.add_root(layout)
+    
+    # 4. AVVIA IL MONITORAGGIO: controlla ogni 200ms se ci sono nuovi dati in state.py
+    doc.add_periodic_callback(check_for_spec_updates, 200)
+
+
+def check_for_spec_updates():
+    """Funzione chiamata periodicamente da spec_app."""
+    # Se il processor ha alzato il flag 'updated' nel dizionario CURRENT_SPEC
+    if state.CURRENT_SPEC.get('updated'):
+        update_spectrum_plot()
+
+
+
+# ----------------------------------------------------------------------
+# 2. LOGICA DI AGGIORNAMENTO SPETTRO (CHIAMATA DA PERIODIC CALLBACK)
+# ----------------------------------------------------------------------
+def update_spectrum_plot():
+    doc_state = state.SPEC_DOC_STATE
+    data = state.CURRENT_SPEC
+    
+    if not doc_state:
+        return
+
+    def safe_update():
+        try:
+            is_stokes = (data.get('spectrum_type') == 'stokes')
+            active_pols = ['I', 'Q', 'U', 'V'] if is_stokes else ['LL', 'RR']
+            
+            num_pols = len(active_pols)
+            num_feeds = len(data['averages']) // num_pols if num_pols > 0 else 0
+            file_title = data.get('filename', 'File Sconosciuto') 
+            
+            colors = Category10[10]
+            new_tabs = []
+
+            # --- A. MEMORIA STATO LEGENDA ---
+            hidden_labels = {p: set() for p in active_pols}
+            for p in active_pols:
+                if p in doc_state['figs']:
+                    fig_old = doc_state['figs'][p]
+                    # Accediamo alla legenda solo se presente per evitare il warning
+                    if fig_old.legend:
+                        for leg in fig_old.legend:
+                            for leg_item in leg.items:
+                                label = leg_item.label.get('value')
+                                if any(not r.visible for r in leg_item.renderers):
+                                    hidden_labels[p].add(label)
+
+            # --- B. CICLO DI AGGIORNAMENTO ---
+            for p in active_pols:
+                fig = doc_state['figs'][p]
+                source = doc_state['sources'][p]
+                
+                # 1. Titolo
+                fig.title.text = f"FILE: {file_title} | Pol: {p} ({num_feeds} Feeds)"
+                
+                # 2. Pulizia (Renderer e Legenda)
+                fig.renderers = [r for r in fig.renderers if r.name != "data_line"]
+                if fig.legend:
+                    for leg in fig.legend:
+                        leg.items = []
+                
+                # 3. Creazione linee
+                labels = data.get('legend_labels', [])
+                for i in range(num_feeds):
+                    current_label = labels[i] if i < len(labels) else f"Feed {i}"
+                    is_visible = current_label not in hidden_labels[p]
+
+                    fig.line(
+                        x='x', y=f'f{i}', source=source, 
+                        color=colors[i % 10], 
+                        legend_label=current_label,
+                        line_width=2,
+                        name="data_line",
+                        visible=is_visible 
+                    )
+
+                # 4. Update Dati
+                new_dict = {'x': data['x']}
+                for i in range(num_feeds):
+                    idx = i * num_pols + active_pols.index(p)
+                    if idx < len(data['averages']):
+                        new_dict[f'f{i}'] = data['averages'][idx]
+                source.data = new_dict
+
+                # 5. Configurazione Legenda (Senza Warning)
+                if fig.legend:
+                    for leg in fig.legend:
+                        leg.click_policy = "hide"
+                
+                if 'freq_range' in fig.extra_x_ranges:
+                    fig.extra_x_ranges['freq_range'].start = data.get('f_min', 0)
+                    fig.extra_x_ranges['freq_range'].end = data.get('f_max', 1)
+
+                new_tabs.append(Panel(child=fig, title=f"Pol {p}"))
+
+            # --- C. UPDATE UI ---
+            doc_state['tabs_container'].tabs = new_tabs
+            state.CURRENT_SPEC['updated'] = False
+
+        except Exception as e:
+            print(f"BOKEH ERROR: {e}")
+            state.CURRENT_SPEC['updated'] = False
+
+    doc_state['doc'].add_next_tick_callback(safe_update)
+
+            
 
 # ----------------------------------------------------------------------
 # 2. GESTIONE AGGIORNAMENTO (Chiamato dal Worker B)
@@ -150,6 +256,32 @@ def update_bokeh_plot(result_maps: Dict[str, Dict[str, Any]]):
 # 3. AVVIO DEL SERVER
 # ----------------------------------------------------------------------
 
+def start_bokeh_server(port: int = 5006, apps: Dict[str, Any] = None):
+    """
+    Versione aggiornata che accetta un dizionario di applicazioni.
+    """
+    global server, server_thread
+
+    allowed_origins = [f"localhost:{port}", "localhost:5000", "127.0.0.1:5000"]
+
+    # Se non passiamo apps, carichiamo quella di default (retrocompatibilit�)
+    if apps is None:
+        apps = {'/map_viewer': Application(FunctionHandler(map_app))}
+    else:
+        # Trasformiamo le funzioni passate in Application Bokeh
+        apps = {route: Application(FunctionHandler(func)) for route, func in apps.items()}
+
+    server = Server(apps, port=port, allow_websocket_origin=allowed_origins)
+
+    def run_server():
+        server.start()
+        server.io_loop.start()
+
+    server_thread = Thread(target=run_server, daemon=True)
+    server_thread.start()
+    print(f"BOKEH: Server multi-app avviato su porta {port}")
+
+'''
 def start_bokeh_server(port: int = 5006, app_name: str = '/map_viewer'):
     """
     Avvia il server Bokeh in un thread separato.
@@ -196,37 +328,65 @@ def start_bokeh_server(port: int = 5006, app_name: str = '/map_viewer'):
     
     print("BOKEH: Server avviato in thread separato.")
 
+'''
+
 # ----------------------------------------------------------------------
 # 4. NUOVA GESTIONE AGGIORNAMENTO SCATTER PLOT (Metodo Generico X, Y, Z)
 # ----------------------------------------------------------------------
 
 def update_scatter_plot(new_points: Dict[str, Dict[str, List[float]]]):
-    """
-    Esegue lo streaming dei nuovi punti (X, Y, Z) ai ColumnDataSource dello scatter.
-    La struttura attesa per new_points �:
-    {
-        'Pol0': {'x': [...], 'y': [...], 'z': [...]},
-        'Pol1': {'x': [...], 'y': [...], 'z': [...]}
-    }
-    """
-    
     doc_state = state.BOKEH_DOC_STATE
     if doc_state is None or doc_state['doc'] is None:
         print("BOKEH: Stato per Scatter Plot non inizializzato.")
         return
 
     def safe_scatter_update():
-        # Recupero sorgenti e mapper (verranno inizializzati in bokeh_visuals)
+        
+        # Recupero sorgenti e figure (assicurati che p0_spec/p1_spec siano nel doc_state)
         source0 = doc_state.get('source_scatter_pol0')
         source1 = doc_state.get('source_scatter_pol1')
+        source_spec = doc_state.get('source_spec')
         color_mapper = doc_state.get('color_mapper_scatter')
         
+        # --- MODIFICA QUI: Recupero le figure per cambiare i titoli/assi ---
+        p0_fig = doc_state.get('p0_spec')
+        p1_fig = doc_state.get('p1_spec')
+        
         if source0 is None or source1 is None:
-            # Se i sorgenti non esistono, significa che il layout scatter non � attivo
             return
 
-        # --- 1. AGGIORNAMENTO DINAMICO RANGE COLORI ---
-        # Unifichiamo i valori Z di entrambe le polarizzazioni per la scala colori
+        print('DEBUG: Valore flag ->', state.IS_NEW_DATASET)
+
+
+       
+        if state.IS_NEW_DATASET:
+            print("DEBUG: Entrato nella IF!") # Se questa non esce, c'� un problema di logica Python assurdo
+            # 1. Recuperiamo i nuovi dati per calcolare i limiti
+            # Usiamo LAST_SPECTRUM_X perch� contiene l'asse delle ascisse aggiornato
+            new_x = state.LAST_SPECTRUM_X
+            
+            if new_x is not None and len(new_x) > 0:
+                x_min = min(new_x)
+                x_max = max(new_x)
+                
+                # 2. Imponiamo i limiti numerici esatti
+                # Questo sovrascrive lo zoom manuale dell'utente
+                p0_fig.x_range.start = x_min
+                p0_fig.x_range.end = x_max
+                p1_fig.x_range.start = x_min
+                p1_fig.x_range.end = x_max
+                
+                print(f"BOKEH: Zoom resettato sui nuovi limiti: [{x_min}, {x_max}]")
+    
+            # 3. Importante: resettiamo il flag
+            state.IS_NEW_DATASET = False
+
+
+
+       
+
+       
+        # --- 1. AGGIORNAMENTO DINAMICO RANGE COLORI (Invariato) ---
         all_z_values = []
         for pol in ['Pol0', 'Pol1']:
             if pol in new_points:
@@ -234,20 +394,16 @@ def update_scatter_plot(new_points: Dict[str, Dict[str, List[float]]]):
         
         if all_z_values and color_mapper:
             current_min, current_max = min(all_z_values), max(all_z_values)
-            # Aggiornamento "espansivo": la scala si adatta al minimo e massimo assoluti visti finora
             color_mapper.low = min(color_mapper.low, current_min)
             color_mapper.high = max(color_mapper.high, current_max)
 
-        # --- 2. STREAMING DEI DATI (APPEND) ---
-        # Pol0: Aggiunge i nuovi punti senza cancellare i precedenti
+        # --- 2. STREAMING DEI DATI MAPPA (Invariato) ---
         if 'Pol0' in new_points and len(new_points['Pol0']['x']) > 0:
             source0.stream({
                 'x': new_points['Pol0']['x'],
                 'y': new_points['Pol0']['y'],
                 'z': new_points['Pol0']['z']
             })
-            
-        # Pol1: Aggiunge i nuovi punti senza cancellare i precedenti
         if 'Pol1' in new_points and len(new_points['Pol1']['x']) > 0:
             source1.stream({
                 'x': new_points['Pol1']['x'],
@@ -255,7 +411,40 @@ def update_scatter_plot(new_points: Dict[str, Dict[str, List[float]]]):
                 'z': new_points['Pol1']['z']
             })
 
-        print(f"BOKEH: Scatter Update - Aggiunti {len(all_z_values)} punti totali.")
+        # --- 3. AGGIORNAMENTO SPETTRO + CAMBIO ASSI DINAMICO ---
+        if state.SPECTRUM_UPDATED and source_spec is not None:
+            
+            # --- MODIFICA QUI: LOGICA CAMALEONTE ---
+            # Controlliamo il tipo di spettro globale
+            spec_type = getattr(state, 'SPECTRUM_TYPE', 'spectra')
+            
+            if spec_type == "simple":
+                new_label = "Sampling Point [#]"
+                new_title = "Total Power History"
+            else:
+                new_label = "Frequency [MHz]"
+                new_title = "Average Spectrum"
+
+            # Applichiamo i cambiamenti agli assi e ai titoli
+            if p0_fig:
+                p0_fig.xaxis.axis_label = new_label
+                p0_fig.title.text = f"{new_title} - Pol0"
+            if p1_fig:
+                p1_fig.xaxis.axis_label = new_label
+                p1_fig.title.text = f"{new_title} - Pol1"
+            
+            # ---------------------------------------
+
+            # 1. Spediamo i dati al browser
+            source_spec.data = {
+                'f':  state.LAST_SPECTRUM_X,
+                'p0': state.LAST_SPECTRUM_POL0,
+                'p1': state.LAST_SPECTRUM_POL1
+            }
+    
+            # 2. Reset semaforo
+            state.SPECTRUM_UPDATED = False 
+            print(f"BOKEH: Spettro ({spec_type}) visualizzato, assi aggiornati.")
 
     # Iniezione sicura nel loop di Bokeh
     doc_state['doc'].add_next_tick_callback(safe_scatter_update)

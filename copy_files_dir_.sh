@@ -1,13 +1,18 @@
 #!/bin/bash
 
-SOURCE_DIR="/roach2_nuraghe/data/26-23/20250611/20250611-091934-26-23-W3OH" # nodding with SARDARA
+#SOURCE_DIR="/roach2_nuraghe/data/26-23/20250611/20250611-091934-26-23-W3OH" # nodding with SARDARA
 #SOURCE_DIR="/home02/fabio.schirru/skarab/20241024/ps/20241024-150844-S0000-W3OH" # position switching SKARAB
+SOURCE_DIR="/roach2_nuraghe/data/2-25/20250314/20250314-153203-2-25-SUN_RA_K18" # sun map
+
 DEST_DIR="/home02/fabio.schirru/github/quick-look_2025_socket/fits_files"
+
+FILE_EXT="fits0"     # <-- change this value accordingly to the case
+
 
 echo "Monitoring started. Copy every 5 seconds..."
   
 while true; do
-    for file in "$SOURCE_DIR"/*.fits; do
+    for file in "$SOURCE_DIR"/*.${FILE_EXT}; do
         [ -e "$file" ] || continue   # Nessun file .fits
 
         basefile=$(basename "$file")

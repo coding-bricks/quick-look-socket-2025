@@ -172,8 +172,8 @@ def _plot_and_save_html(plot_save_dir, filepath, filename_prefix, filename_exten
         
         # Inizializzazione figure (p0, p1, p2 come nel tuo codice)
         p0 = figure(title=f"File: {filename_prefix} - POL [STOKES]", x_axis_label=x_axis_label_val, y_axis_label='Counts', width=740, height=500, tools="pan,wheel_zoom,box_zoom,reset")
-        p1 = figure(title=f"File: {filename_prefix} - POL [LEFT]", x_axis_label=x_axis_label_val, y_axis_label='Counts', width=740, height=250, tools="pan,wheel_zoom,box_zoom,reset")
-        p2 = figure(title=f"File: {filename_prefix} - POL [RIGHT]", x_axis_label=x_axis_label_val, y_axis_label='Counts', width=740, height=250, tools="pan,wheel_zoom,box_zoom,reset")
+        p1 = figure(title=f"File: {filename_prefix} - POL [LEFT]", x_axis_label=x_axis_label_val, y_axis_label='Counts', width=740, height=500, tools="pan,wheel_zoom,box_zoom,reset")
+        p2 = figure(title=f"File: {filename_prefix} - POL [RIGHT]", x_axis_label=x_axis_label_val, y_axis_label='Counts', width=740, height=500, tools="pan,wheel_zoom,box_zoom,reset")
 
         # Selezione colori (tua logica originale)
         n = len(averages)
@@ -249,9 +249,28 @@ def _plot_and_save_html(plot_save_dir, filepath, filename_prefix, filename_exten
         p0.legend.click_policy = p1.legend.click_policy = p2.legend.click_policy = "hide"
 
         # Layout finale
+        #if(spectrum_type == 'spectra' or spectrum_type == 'simple'):
+        #    final_plot_layout = column(p1, p2, spacing = 20)
+        #else:
+        #    final_plot_layout = column(p0)
+
+        
+
+        # --- NUOVO LAYOUT CON TABS ---
         if(spectrum_type == 'spectra' or spectrum_type == 'simple'):
-            final_plot_layout = column(p1, p2, spacing = 20)
+            # Creiamo i pannelli per le due polarizzazioni
+            tab1 = Panel(child=p1, title="LEFT Polarization (LCP)")
+            tab2 = Panel(child=p2, title="RIGHT Polarization (RCP)")
+            
+            # Li raggruppiamo in un oggetto Tabs
+            final_plot_layout = Tabs(tabs=[tab1, tab2])
+            
+            # Sincronizziamo gli assi X per comodit� di analisi
+            p2.x_range = p1.x_range
+            p2.extra_x_ranges['freq_range'] = p1.extra_x_ranges['freq_range']
+            
         else:
+            # Per Stokes o altri, manteniamo il layout a colonna singola (p0)
             final_plot_layout = column(p0)
 
 
@@ -409,76 +428,135 @@ def create_map_layout(doc) -> Tuple[Any, Dict[str, Any]]:
 
 def create_scatter_layout(doc) -> Tuple[Any, Dict[str, Any]]: 
     """
-    Crea il layout iniziale per lo Scatter Plot (X, Y, Z) con due Tab (Pol0, Pol1).
-    Supporta l'aggiornamento incrementale tramite streaming.
+    Crea il layout iniziale con:
+    1. Tabs per la mappa Scatter (Pol0, Pol1)
+    2. Tabs per lo Spettro Medio (Pol0, Pol1) sotto la mappa.
     """
+    # Recuperiamo il sistema di coordinate attuale dallo stato
+    coord_system = getattr(state, 'CURRENT_COORD_SYSTEM', 'AZEL')
 
-    # --- 1. Definizione Mapper Colore ---
-    # Usiamo Magma256 come per la mappa grigliata, ma dedicata allo scatter
+    # Configurazione dinamica delle label mappa
+    if coord_system == "RADEC":
+        x_label, y_label = "RA [deg]", "DEC [deg]"
+        plot_title_suffix = "Equatorial (RA/DEC)"
+    else:
+        x_label, y_label = "AZ [deg]", "EL [deg]"
+        plot_title_suffix = "Horizontal (AZ/EL)"
+
+    # --- 1. Definizione Mapper Colore per lo Scatter ---
     color_mapper = LinearColorMapper(palette=Magma256, low=0, high=1)
 
-    # --- 2. Inizializzazione ColumnDataSource (VUOTI) ---
-    # Fondamentale: per lo streaming partiamo con liste vuote
+    # --- 2. Inizializzazione ColumnDataSource ---
     source_scatter_pol0 = ColumnDataSource(data=dict(x=[], y=[], z=[]))
     source_scatter_pol1 = ColumnDataSource(data=dict(x=[], y=[], z=[]))
-
-    # --- 3. Creazione Figure ---
     
-    # Tooltip opzionali per vedere i valori al passaggio del mouse
+    # Sorgente per lo spettro (X=frequenza, Y=potenza)
+    source_spec = ColumnDataSource(data=dict(f=[], p0=[], p1=[]))
+
+    # --- 3. Creazione Figure MAPPA ---
     tooltips = [("X", "@x"), ("Y", "@y"), ("Z (Power)", "@z")]
 
-    # Figura Pol0
-    p0 = figure(
-        title="Scatter Plot - Polarizzazione 0",
-        x_axis_label="AZ/RA [deg]", y_axis_label="EL/DEC [deg]",
-        width=600, height=500,
-        active_scroll="wheel_zoom",
-        tooltips=tooltips
-    )
-    # Rendering dei punti (circle)
-    p0.circle(
-        x='x', y='y', size=5,
-        source=source_scatter_pol0,
-        color={'field': 'z', 'transform': color_mapper},
-        line_color=None, # Rimuove il bordo per pulizia visiva
-        legend_label="Punti Pol0"
-    )
+    p0_map = figure(title=f"Scatter Map - {plot_title_suffix} (Pol0)",
+                    x_axis_label=x_label, y_axis_label=y_label,
+                    width=700, height=450, active_scroll="wheel_zoom", tooltips=tooltips)
+    p0_map.circle(x='x', y='y', size=5, source=source_scatter_pol0,
+                  color={'field': 'z', 'transform': color_mapper}, line_color=None)
 
-    # Figura Pol1
-    p1 = figure(
-        title="Scatter Plot - Polarizzazione 1",
-        x_axis_label="AZ/RA [deg]", y_axis_label="EL/DEC [deg]",
-        width=600, height=500,
-        active_scroll="wheel_zoom",
-        tooltips=tooltips
-    )
-    p1.circle(
-        x='x', y='y', size=5,
-        source=source_scatter_pol1,
-        color={'field': 'z', 'transform': color_mapper},
-        line_color=None,
-        legend_label="Punti Pol1"
-    )
+    p1_map = figure(title=f"Scatter Map - {plot_title_suffix} (Pol1)",
+                    x_axis_label=x_label, y_axis_label=y_label,
+                    width=700, height=450, active_scroll="wheel_zoom", tooltips=tooltips)
+    p1_map.circle(x='x', y='y', size=5, source=source_scatter_pol1,
+                  color={'field': 'z', 'transform': color_mapper}, line_color=None)
 
-    # --- 4. Elementi Comuni (ColorBar) ---
     color_bar = ColorBar(color_mapper=color_mapper, location=(0,0), label_standoff=12)
-    p0.add_layout(color_bar, 'right')
-    p1.add_layout(color_bar, 'right')
+    p0_map.add_layout(color_bar, 'right')
+    p1_map.add_layout(color_bar, 'right')
 
-    # --- 5. Layout a Tab ---
-    tab0 = Panel(child=p0, title="Scatter Pol0")
-    tab1 = Panel(child=p1, title="Scatter Pol1")
-    scatter_tabs = Tabs(tabs=[tab0, tab1])
+    
+    # Get the spectrum type and change the x-axis label and figure title accordingly
+    # This is valid only the first time the app is launched
+    x_spec_label = "Sampling Point [#]" if state.SPECTRUM_TYPE == "simple" else "Frequency [MHz]"
+    title_label_pol0 = "Spectrum - Pol0" if state.SPECTRUM_TYPE == "simple" else "Average Spectrum - Pol0"
+    title_label_pol1 = "Spectrum - Pol1" if state.SPECTRUM_TYPE == "simple" else "Average Spectrum - Pol1"
 
-    final_layout = column(scatter_tabs)
+    # --- 4. Creazione Figure SPETTRO (con TAB separate) ---
+    # Spettro Pol0
+    p0_spec = figure(title=title_label_pol0,
+                     x_axis_label=x_spec_label, y_axis_label="Power [Arb.]",
+                     width=700, height=250, 
+                     tools="reset,save,wheel_zoom,pan,box_zoom", # <-- Aggiunto box_zoom
+                     active_scroll="wheel_zoom",
+                     active_drag="box_zoom")                     # <-- Impostato come default
+    p0_spec.line(x='f', y='p0', source=source_spec, color="navy", line_width=2)
 
-    # --- 6. Stato per BOKEH_DOC_STATE ---
+    # Spettro Pol1
+    p1_spec = figure(title=title_label_pol1,
+                     x_axis_label=x_spec_label, y_axis_label="Power [Arb.]",
+                     width=700, height=250, 
+                     tools="reset,save,wheel_zoom,pan,box_zoom", # <-- Aggiunto box_zoom
+                     active_scroll="wheel_zoom",
+                     active_drag="box_zoom")                     # <-- Impostato come default
+    p1_spec.line(x='f', y='p1', source=source_spec, color="red", line_width=2)
+   
+    # --- 5. Organizzazione in TABS ---
+    # Tabs per la Mappa
+    map_tab0 = Panel(child=p0_map, title="Map LL/Pol0")
+    map_tab1 = Panel(child=p1_map, title="Map RR/Pol1")
+    map_tabs = Tabs(tabs=[map_tab0, map_tab1])
+
+    # Tabs per lo Spettro
+    spec_tab0 = Panel(child=p0_spec, title="Spec LL/Pol0")
+    spec_tab1 = Panel(child=p1_spec, title="Spec RR/Pol1")
+    spec_tabs = Tabs(tabs=[spec_tab0, spec_tab1])
+
+    # --- 6. Layout Finale ---
+    # Colonna: Sopra le tab della mappa, sotto le tab dello spettro
+    final_layout = column(map_tabs, spec_tabs, spacing=30)
+
+    # --- 7. Stato per aggiornamenti ---
     doc_state = {
         'doc': doc,
         'source_scatter_pol0': source_scatter_pol0,
         'source_scatter_pol1': source_scatter_pol1,
-        'color_mapper_scatter': color_mapper 
+        'source_spec': source_spec, 
+        'color_mapper_scatter': color_mapper,
+        # AGGIUNGI QUESTI:
+        'p0_spec': p0_spec,
+        'p1_spec': p1_spec
     }
 
     return final_layout, doc_state
 
+
+
+def create_spectrum_layout(doc):
+    # Definiamo le possibili polarizzazioni
+    pols = ['LL', 'RR', 'I', 'Q', 'U', 'V']
+    sources = {p: ColumnDataSource(data=dict(x=[])) for p in pols}
+    figs = {}
+
+    for p in pols:
+        fig = figure(
+            title=f"Polarization {p}", 
+            x_axis_label="Channels", y_axis_label="Counts",
+            width=850, height=500,
+            tools="pan,wheel_zoom,box_zoom,reset,save,hover"
+        )
+        # Asse frequenza superiore
+        fig.extra_x_ranges = {"freq_range": Range1d(start=0, end=1)}
+        fig.add_layout(LinearAxis(x_range_name="freq_range", axis_label="Frequency (MHz)"), "above")
+        
+        figs[p] = fig
+
+    tabs_container = Tabs(tabs=[])
+
+    # doc_state ora conterr� solo i contenitori; le linee verranno create dinamicamente
+    doc_state = {
+        'doc': doc,
+        'sources': sources,
+        'figs': figs,
+        'tabs_container': tabs_container,
+        'active_renderers': {p: [] for p in pols} # Per tenere traccia delle linee create
+    }
+
+    return tabs_container, doc_state

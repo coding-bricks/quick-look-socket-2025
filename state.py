@@ -1,15 +1,30 @@
 # state.py
-
 import numpy as np
 from typing import Dict, Any, Optional
 
-# --------------------------------------------------------
-# 1. FRONTEND-RELATED STATE
-# --------------------------------------------------------
-# Global variable storing the feed currently selected by the user
-# on the frontend interface
+# ----------------------------------------------------------------------
+# 1. GENERAL & FRONTEND STATE
+# ----------------------------------------------------------------------
+# Indice del feed selezionato dall'utente nell'interfaccia (es. 0, 1, 2...)
 CURRENT_SELECTED_FEED = 0
 
+# Flag globale per Flask/Jinja2: decide quale script Bokeh iniettare nell'HTML
+# True  -> Carica l'app /map_viewer
+# False -> Carica l'app /spectrum_monitor
+IS_MAP = True
+
+# Flag per il tipo di visualizzazione della mappa (Nuvola di punti vs Griglia)
+USE_SCATTER_MODE = True
+
+# Sistema di coordinate corrente per il puntamento (RADEC o AZEL)
+CURRENT_COORD_SYSTEM: str = "AZEL"
+
+# spectrum type used to switch X-AXIS labels
+SPECTRUM_TYPE = "spectra" # by default
+
+# Variables used to reset the x-axis ranges
+CURRENT_SCHEDULE = None   # Memorizza l'ultima sorgente elaborata
+IS_NEW_DATASET = False  # Il flag che Bokeh "ascolter�"
 
 # --------------------------------------------------------
 # 1.1 SUBSCAN STATE
@@ -18,92 +33,71 @@ CURRENT_SELECTED_FEED = 0
 # from the FITS file
 LAST_PROCESSED_SUBSCAN_ID = 0
 
-# --------------------------------------------------------
-# 1.2 SCATTER MODE
-# --------------------------------------------------------
-# Global flag used to switch between map visualization modes
-# True  -> scatter plot
-# False -> grid plot with fixed steps in X and Y
-USE_SCATTER_MODE = True
 
-
-# --------------------------------------------------------
-# 2. MAP-RELATED STATE (Persistent Point Cloud)
-# --------------------------------------------------------
-
-# Data structure used to store raw map data (RA, DEC, P)
-# together with their global limits.
-# The cache is initialized in an EMPTY state.
-GLOBAL_MAP_CACHE: Dict = {}
-
-# Global variable storing the HPBW (Half Power Beam Width) in arcseconds
-# computed by FITS_processor.py.
-# This value is a critical input for map_gridding.py.
-GLOBAL_HPBW_ARCSEC: float = 0.0
-
-
-# ====================================================================
-# GLOBAL STATE FOR REAL-TIME MAP GRIDDING
-# ====================================================================
-
-# Dictionary containing the accumulated point clouds (X, Y, P).
-# NOTE: X and Y are generic coordinates (e.g. RA/DEC or AZ/EL).
+# ----------------------------------------------------------------------
+# 2. MAP DATA CACHE (Persistent Point Cloud)
+# ----------------------------------------------------------------------
+# Dizionario che accumula i dati grezzi (X, Y, Potenza) durante le scansioni.
+# Serve per mantenere i punti precedenti mentre ne arrivano di nuovi.
 GLOBAL_MAP_CACHE: Dict[str, Dict[str, Any]] = {}
 
-# HPBW (Half Power Beam Width) value in arcseconds,
-# used to define the grid step size.
+# Valore del fascio calcolato (Half Power Beam Width) in arcosecondi.
+# Fondamentale per determinare la risoluzione della griglia nelle mappe.
 GLOBAL_HPBW_ARCSEC: float = 0.0
 
-
 def initialize_map_cache():
-    """
-    Initialize the data structure for the two polarizations (Pol0 and Pol1).
-
-    This function is called at startup and every time the system
-    switches between Map mode and Spectrum mode.
-    """
-    global GLOBAL_MAP_CACHE
-    
-    # The cache is structured to store accumulated points and
-    # global coordinate limits for each supported polarization
-    # (at least Pol0 and Pol1)
+    """Inizializza o svuota la cache delle mappe per Pol0 e Pol1."""
+    global GLOBAL_MAP_CACHE, GLOBAL_HPBW_ARCSEC
     GLOBAL_MAP_CACHE = {
         'Pol0': {
-            'X': np.array([]),       # Accumulated X coordinates (RA or AZ)
-            'Y': np.array([]),       # Accumulated Y coordinates (DEC or EL)
-            'P': np.array([]),       # Accumulated power values P_i
-            'X_min': np.inf,         # Global minimum X value
-            'X_max': -np.inf,        # Global maximum X value
-            'Y_min': np.inf,         # Global minimum Y value
-            'Y_max': -np.inf,        # Global maximum Y value
+            'X': np.array([]), 'Y': np.array([]), 'P': np.array([]),
+            'X_min': np.inf,   'X_max': -np.inf,
+            'Y_min': np.inf,   'Y_max': -np.inf,
         },
         'Pol1': {
-            'X': np.array([]),
-            'Y': np.array([]),
-            'P': np.array([]),
-            'X_min': np.inf,
-            'X_max': -np.inf,
-            'Y_min': np.inf,
-            'Y_max': -np.inf,
+            'X': np.array([]), 'Y': np.array([]), 'P': np.array([]),
+            'X_min': np.inf,   'X_max': -np.inf,
+            'Y_min': np.inf,   'Y_max': -np.inf,
         },
     }
-    
-    print("? Global map cache (X/Y) successfully initialized.")
-    
-    # Reset the HPBW value.
-    # When switching from Map mode to Spectrum mode,
-    # this value must be recomputed.
-    GLOBAL_HPBW_ARCSEC = 0.0 
+    GLOBAL_HPBW_ARCSEC = 0.0
+    print("? Cache mappe e HPBW inizializzati correttamente.")
 
 
-# Initialize the map cache when the module is loaded
-initialize_map_cache()
+# ----------------------------------------------------------------------
+# 3. SPECTRUM DATA (Real-Time Monitor)
+# ----------------------------------------------------------------------
+# Questo dizionario � il "ponte" tra il Processor e l'app Bokeh dello spettro.
+CURRENT_SPEC = {
+    'x': np.array([]),       # Asse X: canali (es. 0..65535) o frequenze relative
+    'averages': [],          # Lista di ndarray con i valori di potenza (uno per linea/feed)
+    'f_min': 0.0,            # Frequenza minima per l'asse superiore (MHz)
+    'f_max': 0.0,            # Frequenza massima per l'asse superiore (MHz)
+    'filename': "",          # Nome del file FITS in elaborazione (per il titolo del plot)
+    'num_feeds': 1,          # Numero di feed rilevati nel file (per i colori e la legenda)
+    'spectrum_type': "",     # Tipo di dato: 'spectra' (LL, RR), 'stokes' (I,Q,U,V), 'simple'
+    'updated': False         # SEMAFORO: True quando il processor ha finito di scrivere i dati
+}
 
-# --------------------------------------------------------
-# 3. BOKEH SERVER STATE
-# --------------------------------------------------------
+# Variabili storiche (mantenute per compatibilit� con vecchi moduli se necessario)
+LAST_SPECTRUM_X = np.array([])
+LAST_SPECTRUM_POL0 = np.array([])
+LAST_SPECTRUM_POL1 = np.array([])
+SPECTRUM_UPDATED = False 
 
-# Stores references to the Bokeh document (doc) and its
-# associated ColumnDataSource objects.
-# Initialized to None and populated *after* the server starts.
+
+# ----------------------------------------------------------------------
+# 4. BOKEH SERVER INTERNALS (Object References)
+# ----------------------------------------------------------------------
+# ATTENZIONE: Questi oggetti NON sono dati, ma i riferimenti ai componenti
+# live di Bokeh (Documenti, Sorgenti, Layout). Permettono l'aggiornamento push.
+
+# Stato per l'app /map_viewer
 BOKEH_DOC_STATE: Optional[Dict[str, Any]] = None
+
+# Stato per l'app /spectrum_monitor
+SPEC_DOC_STATE: Optional[Dict[str, Any]] = None
+
+
+# Inizializzazione automatica all'import del modulo
+initialize_map_cache()

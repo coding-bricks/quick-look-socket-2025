@@ -94,13 +94,23 @@ def _check_mounted_drives(drive_paths):
 @app.route('/')
 def index():
     bokeh_url = "http://localhost:5006"
-    app_path = "/map_viewer"
-    bokeh_script = server_document(url=bokeh_url + app_path)
+    
+    # Generiamo il gancio per la mappa
+    map_script = server_document(url=bokeh_url + "/map_viewer")
+    
+    # Generiamo il gancio per lo spettro monitor
+    spec_script = server_document(url=bokeh_url + "/spectrum_monitor")
+
+    # Supponiamo di sapere cosa mostrare in base a una logica o allo stato
+    current_type = 'map' if state.IS_MAP else 'spectrum'
 
     return render_template(
         'index.html',
-        bokeh_script=bokeh_script
+        map_script=map_script,
+        spec_script=spec_script,
+        spectrum_type=current_type  # <--- Fondamentale per l'IF nel template
     )
+    
 
 
 # --- SocketIO Event Handlers ---
@@ -184,12 +194,23 @@ def start_app():
         print("FITS monitor failed to start. File monitoring disabled.")
         return
 
-    # 7.5. Start the Bokeh server on a separate port
+    # 7.5. Start the Bokeh server with multiple applications
     try:
-        bokeh_server.start_bokeh_server(port=5006, app_name='/map_viewer')
-        print("BOKEH: Map visualization server started successfully.")
+        # Definiamo le applicazioni e le loro funzioni di setup
+        # Assicurati che 'spec_app' sia definita o importata da bokeh_server
+        apps_to_load = {
+            '/map_viewer': bokeh_server.map_app,
+            '/spectrum_monitor': bokeh_server.spec_app
+        }
+        
+        # Passiamo il dizionario invece della singola stringa
+        bokeh_server.start_bokeh_server(port=5006, apps=apps_to_load)
+        print("BOKEH: Visualization server started with Map and Spectrum apps.")
+        
     except Exception as e:
         print(f"CRITICAL ERROR: Unable to start Bokeh server: {e}")
+
+   
 
     # 8. Start the Flask-SocketIO server
     socketio.run(
