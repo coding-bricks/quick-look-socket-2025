@@ -72,22 +72,25 @@ def update_spectrum_plot():
 
     def safe_update():
         try:
+            # --- 1. CONFIGURAZIONE E BOLEANI ---
             is_stokes = (data.get('spectrum_type') == 'stokes')
+            is_simple = (data.get('spectrum_type') == 'simple')
             active_pols = ['I', 'Q', 'U', 'V'] if is_stokes else ['LL', 'RR']
             
             num_pols = len(active_pols)
             num_feeds = len(data['averages']) // num_pols if num_pols > 0 else 0
-            file_title = data.get('filename', 'File Sconosciuto') 
-            
+            file_title = data.get('filename', 'File Sconosciuto')
+            labels = data.get('legend_labels', [])
             colors = Category10[10]
+            
             new_tabs = []
 
-            # --- A. MEMORIA STATO LEGENDA ---
+            # --- 2. MEMORIA STATO VISIBILIT� LEGENDA ---
+            # Serve per evitare che i feed "spenti" dall'utente si riaccendano al nuovo file
             hidden_labels = {p: set() for p in active_pols}
             for p in active_pols:
                 if p in doc_state['figs']:
                     fig_old = doc_state['figs'][p]
-                    # Accediamo alla legenda solo se presente per evitare il warning
                     if fig_old.legend:
                         for leg in fig_old.legend:
                             for leg_item in leg.items:
@@ -95,22 +98,43 @@ def update_spectrum_plot():
                                 if any(not r.visible for r in leg_item.renderers):
                                     hidden_labels[p].add(label)
 
-            # --- B. CICLO DI AGGIORNAMENTO ---
+            # --- 3. CICLO DI AGGIORNAMENTO PER OGNI POLARIZZAZIONE ---
             for p in active_pols:
+                if p not in doc_state['figs']:
+                    continue
+                    
                 fig = doc_state['figs'][p]
                 source = doc_state['sources'][p]
                 
-                # 1. Titolo
-                fig.title.text = f"FILE: {file_title} | Pol: {p} ({num_feeds} Feeds)"
+                # A. Gestione Assi (Inferiore e Superiore)
+                fig.xaxis.axis_label = "Sampling Point" if is_simple else "Channel"
                 
-                # 2. Pulizia (Renderer e Legenda)
+                f_min = data.get('f_min', 0.0)
+                f_max = data.get('f_max', 1.0)
+                
+                # Cerchiamo l'asse superiore per aggiornare etichetta e visibilit�
+                if 'freq_range' in fig.extra_x_ranges:
+                    # Aggiorna i limiti numerici
+                    fig.extra_x_ranges['freq_range'].start = f_min
+                    fig.extra_x_ranges['freq_range'].end = f_max
+                    
+                    for axis in fig.above:
+                        if hasattr(axis, 'x_range_name') and axis.x_range_name == "freq_range":
+                            axis.visible = not is_simple
+                            # FORZA l'etichetta corretta qui
+                            axis.axis_label = "Frequency (MHz)" if not is_simple else ""
+
+                # B. Titolo dinamico
+                freq_info = f" | {f_min:.1f}-{f_max:.1f} MHz" if not is_simple else ""
+                fig.title.text = f"FILE: {file_title} | Pol: {p}{freq_info} ({num_feeds} Feeds)"
+                
+                # C. Pulizia Renderer e Legenda
                 fig.renderers = [r for r in fig.renderers if r.name != "data_line"]
                 if fig.legend:
                     for leg in fig.legend:
                         leg.items = []
                 
-                # 3. Creazione linee
-                labels = data.get('legend_labels', [])
+                # D. Creazione Nuove Linee (Feed)
                 for i in range(num_feeds):
                     current_label = labels[i] if i < len(labels) else f"Feed {i}"
                     is_visible = current_label not in hidden_labels[p]
@@ -124,36 +148,35 @@ def update_spectrum_plot():
                         visible=is_visible 
                     )
 
-                # 4. Update Dati
+                # E. Update Dati (Mapping dei dati nelle colonne della sorgente)
                 new_dict = {'x': data['x']}
                 for i in range(num_feeds):
+                    # Calcolo indice: alterna le pol per ogni feed (es: Feed0_L, Feed0_R, Feed1_L...)
                     idx = i * num_pols + active_pols.index(p)
                     if idx < len(data['averages']):
                         new_dict[f'f{i}'] = data['averages'][idx]
                 source.data = new_dict
 
-                # 5. Configurazione Legenda (Senza Warning)
+                # F. Configurazione Interattivit� Legenda
                 if fig.legend:
                     for leg in fig.legend:
                         leg.click_policy = "hide"
                 
-                if 'freq_range' in fig.extra_x_ranges:
-                    fig.extra_x_ranges['freq_range'].start = data.get('f_min', 0)
-                    fig.extra_x_ranges['freq_range'].end = data.get('f_max', 1)
-
                 new_tabs.append(Panel(child=fig, title=f"Pol {p}"))
 
-            # --- C. UPDATE UI ---
+            # --- 4. AGGIORNAMENTO INTERFACCIA ---
             doc_state['tabs_container'].tabs = new_tabs
             state.CURRENT_SPEC['updated'] = False
 
         except Exception as e:
-            print(f"BOKEH ERROR: {e}")
+            print(f"BOKEH UPDATE ERROR: {e}")
+            import traceback
+            traceback.print_exc()
             state.CURRENT_SPEC['updated'] = False
 
+    # Invia l'aggiornamento al thread principale di Bokeh
     doc_state['doc'].add_next_tick_callback(safe_update)
 
-            
 
 # ----------------------------------------------------------------------
 # 2. GESTIONE AGGIORNAMENTO (Chiamato dal Worker B)

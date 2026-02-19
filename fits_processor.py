@@ -311,8 +311,8 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                     end_time_io_calc = time.time()
                     print(f"PROFILING: [Timer 1] I/O Disco + Calcolo Media completato in {end_time_io_calc - start_time_io_calc:.4f} secondi.")
 
-                    return _plot_and_save_html(PLOT_SAVE_DIR, filepath, filename_prefix, filename_extension, feeds, chs, spectrum_type, 
-                        backend, x_axis_label_val, x, averages, feed_number, start_time_total, freq, lo, bw)
+                    #return _plot_and_save_html(PLOT_SAVE_DIR, filepath, filename_prefix, filename_extension, feeds, chs, spectrum_type, 
+                    #    backend, x_axis_label_val, x, averages, feed_number, start_time_total, freq, lo, bw)
 
                 else: # is a map
 
@@ -628,6 +628,13 @@ def process_fits_file(filepath):
 
         # --- Get data and generate the Bokeh plot ---
         # plot_url = create_and_save_bokeh_plot___(filepath)
+
+        _extract_data_and_perform_averages(filepath, filename_base, filename_extension, 
+            acq_feeds_unique_values, int(header_data.get("bins")), header_data.get("spectrum"), backend, freq, lo, bw, header_data.get("sub_scan_type"),
+            int(header_data["header"]["SubScanID"]))
+        
+        
+        '''
         plot_url = _extract_data_and_perform_averages(filepath, filename_base, filename_extension, 
             acq_feeds_unique_values, int(header_data.get("bins")), header_data.get("spectrum"), backend, freq, lo, bw, header_data.get("sub_scan_type"),
             int(header_data["header"]["SubScanID"]))
@@ -638,7 +645,7 @@ def process_fits_file(filepath):
             print(f"Plot URL added to data: {plot_url}")
         else:
             print("No plot URL generated for this FITS file.")
-
+        '''
 
         if _socketio_instance:
             print(f"Emitting FITS header and plot URL for {os.path.basename(filepath)} to frontend.")

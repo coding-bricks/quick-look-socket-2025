@@ -458,13 +458,13 @@ def create_scatter_layout(doc) -> Tuple[Any, Dict[str, Any]]:
 
     p0_map = figure(title=f"Scatter Map - {plot_title_suffix} (Pol0)",
                     x_axis_label=x_label, y_axis_label=y_label,
-                    width=700, height=450, active_scroll="wheel_zoom", tooltips=tooltips)
+                    width=780, height=560, active_scroll="wheel_zoom", tooltips=tooltips)
     p0_map.circle(x='x', y='y', size=5, source=source_scatter_pol0,
                   color={'field': 'z', 'transform': color_mapper}, line_color=None)
 
     p1_map = figure(title=f"Scatter Map - {plot_title_suffix} (Pol1)",
                     x_axis_label=x_label, y_axis_label=y_label,
-                    width=700, height=450, active_scroll="wheel_zoom", tooltips=tooltips)
+                    width=780, height=560, active_scroll="wheel_zoom", tooltips=tooltips)
     p1_map.circle(x='x', y='y', size=5, source=source_scatter_pol1,
                   color={'field': 'z', 'transform': color_mapper}, line_color=None)
 
@@ -483,7 +483,7 @@ def create_scatter_layout(doc) -> Tuple[Any, Dict[str, Any]]:
     # Spettro Pol0
     p0_spec = figure(title=title_label_pol0,
                      x_axis_label=x_spec_label, y_axis_label="Power [Arb.]",
-                     width=700, height=250, 
+                     width=780, height=250, 
                      tools="reset,save,wheel_zoom,pan,box_zoom", # <-- Aggiunto box_zoom
                      active_scroll="wheel_zoom",
                      active_drag="box_zoom")                     # <-- Impostato come default
@@ -492,7 +492,7 @@ def create_scatter_layout(doc) -> Tuple[Any, Dict[str, Any]]:
     # Spettro Pol1
     p1_spec = figure(title=title_label_pol1,
                      x_axis_label=x_spec_label, y_axis_label="Power [Arb.]",
-                     width=700, height=250, 
+                     width=780, height=250, 
                      tools="reset,save,wheel_zoom,pan,box_zoom", # <-- Aggiunto box_zoom
                      active_scroll="wheel_zoom",
                      active_drag="box_zoom")                     # <-- Impostato come default
@@ -528,35 +528,42 @@ def create_scatter_layout(doc) -> Tuple[Any, Dict[str, Any]]:
     return final_layout, doc_state
 
 
-
 def create_spectrum_layout(doc):
-    # Definiamo le possibili polarizzazioni
     pols = ['LL', 'RR', 'I', 'Q', 'U', 'V']
     sources = {p: ColumnDataSource(data=dict(x=[])) for p in pols}
     figs = {}
+    freq_ranges = {} # <--- Aggiungiamo questo per tracciare i range
 
     for p in pols:
         fig = figure(
             title=f"Polarization {p}", 
             x_axis_label="Channels", y_axis_label="Counts",
-            width=850, height=500,
+            width=780, height=840,
             tools="pan,wheel_zoom,box_zoom,reset,save,hover"
         )
-        # Asse frequenza superiore
-        fig.extra_x_ranges = {"freq_range": Range1d(start=0, end=1)}
-        fig.add_layout(LinearAxis(x_range_name="freq_range", axis_label="Frequency (MHz)"), "above")
+        
+        # Creiamo un Range1d specifico per questa figura
+        f_range = Range1d(start=0, end=1)
+        fig.extra_x_ranges = {"freq_range": f_range}
+        
+        # Aggiungiamo l'asse superiore
+        header_axis = LinearAxis(x_range_name="freq_range", axis_label="Frequency (MHz)")
+        fig.add_layout(header_axis, "above")
         
         figs[p] = fig
+        freq_ranges[p] = f_range # Salviamo il riferimento
 
     tabs_container = Tabs(tabs=[])
 
-    # doc_state ora conterr� solo i contenitori; le linee verranno create dinamicamente
     doc_state = {
         'doc': doc,
         'sources': sources,
         'figs': figs,
+        'freq_ranges': freq_ranges, # <--- Fondamentale per l'aggiornamento
         'tabs_container': tabs_container,
-        'active_renderers': {p: [] for p in pols} # Per tenere traccia delle linee create
+        'active_renderers': {p: [] for p in pols}
     }
 
     return tabs_container, doc_state
+
+

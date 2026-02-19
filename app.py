@@ -135,6 +135,18 @@ def handle_feed_selection(data):
     except ValueError:
         print(f"ERROR: Non-integer feed value received: {data.get('feed')}")
 
+@socketio.on('request_initial_state')
+def handle_initial_state():
+    # Invia lo switch mappa/spettro
+    emit('check_mode', {'is_map': state.IS_MAP})
+    
+    if state.LAST_FULL_DATA_PACKET:
+        emit('new_fits_data', state.LAST_FULL_DATA_PACKET)
+    else:
+        # Se non c'� nulla, possiamo mandare un segnale di "Reset"
+        # o semplicemente lasciare che l'utente veda i campi vuoti
+        print("Pagina sincronizzata: in attesa di nuovi dati.")
+
 
 # --- Application Startup and Shutdown ---
 def start_app():

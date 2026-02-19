@@ -101,3 +101,10 @@ SPEC_DOC_STATE: Optional[Dict[str, Any]] = None
 
 # Inizializzazione automatica all'import del modulo
 initialize_map_cache()
+
+
+# ----------------------------------------------------------------------
+# 5. SOCKETIO RECOVERY STATE
+# ----------------------------------------------------------------------
+# Memorizza l'ultimo pacchetto dati inviato via SocketIO per i nuovi client
+LAST_FULL_DATA_PACKET: Optional[Dict[str, Any]] = None
