@@ -156,8 +156,13 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                         data.append(np.array(hdul["DATA TABLE"].data[f"Ch1"]))
                     else: # case STOKES
                         data.append(np.array(hdul["DATA TABLE"].data[f"Ch0"]))
-            
-            else: # case .fits# i.e. multi-feed (SARDARA only, possibily SKARAB but not TotalPower which has one feed only)
+                        # The above line oc code should be like (to be understood if each sub-spectrum is 1024 in lenght...):
+                        # data.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][:, 0:1024]))
+                        # data.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][:, 1024:2048]))
+                        # data.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][:, 2048:3072]))
+                        # data.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][:, 3072:4096]))
+
+            else: # case .fits# i.e. multi-feed (SARDARA only, SKARAB is always .fits with the feed number specified within the filename)
                 
                 # ... (Logica di estrazione SARDARA multi-feed .fits#) ...
                 feed_number = filename_extension.removeprefix('.fits')
@@ -216,28 +221,10 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
 
                 if not is_map:
 
-                    state.IS_MAP = False
+                    if(state.IS_MAP):
 
-                    # Reset dell'asse X e dei dati dello spettro per la nuova mappa
-                    state.LAST_SPECTRUM_X = np.array([])
-                    state.LAST_SPECTRUM_POL0 = np.array([])
-                    state.LAST_SPECTRUM_POL1 = np.array([])
-
-                    # ----------------------------------------------------
-                    # ?? QUI INSERIAMO LA LOGICA DI RESET ??
-                    # ----------------------------------------------------
-                        
-                    # Verifichiamo se Pol0 (o qualsiasi altra Pol) contiene dati.
-                    if state.GLOBAL_MAP_CACHE['Pol0']['X'].size > 0:
-                        print(">>> Rilevato cambio di modalit� a Spettro. Reset CACHE MAPPA.")
-                        # Chiama la funzione di reset dal modulo state.py
-                        state.initialize_map_cache()
-
-                        # AGGIUNTA FONDAMENTALE PER LO SCATTER:
-                        if state.USE_SCATTER_MODE:
-                            reset_scatter_plot()
-
-
+                        reset_dashboard() # The dashboard is composed by the map and the spectrum in time
+                        state.IS_MAP = False
 
                     # The next condition discriminates for single point data (i.e. TP) or array data (i.e. SARDARA, SKARAB)
                     if(type(data[0][0]) == np.ndarray): # case SARDARA, SKARAB
@@ -282,12 +269,10 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                         'updated': True       # Notifica il server
                     })
 
-                    if spectrum_type == 'spectra':
-                        state.CURRENT_SPEC['tab_labels'] = ["LEFT (LCP)", "RIGHT (RCP)"]
-                    elif spectrum_type == 'stokes':
-                        state.CURRENT_SPEC['tab_labels'] = ["Stokes I", "Stokes Q", "Stokes U", "Stokes V"]
+                    set_tab_labels(spectrum_type)
 
-                    state.CURRENT_SPEC['updated'] = True
+                   
+                    #state.CURRENT_SPEC['updated'] = True
 
                     # --- DEBUG CHECK ---
                     print("--- [DEBUG DIZIONARIO STATE] ---")
@@ -316,25 +301,17 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
 
                 else: # is a map
 
+            
                     state.IS_MAP = True
 
-                    # If the subscan number is smaller or equal than that stored in the state.py
-                    # the map is re-initialized
+                    # If the subscan number is smaller or equal than that stored in the state.py 
+                    # the map is re-initialized because we are starting with a new map
                     if(subscan <= state.LAST_PROCESSED_SUBSCAN_ID):
+
+                        reset_dashboard()
                        
-                        print(">>> New Map detected. Map CACHE reset.")
-                        # Chiama la funzione di reset dal modulo state.py
-                        state.initialize_map_cache()
-                        state.LAST_PROCESSED_SUBSCAN_ID = subscan
 
-                        # AGGIUNTA FONDAMENTALE PER LO SCATTER:
-                        if state.USE_SCATTER_MODE:
-                            reset_scatter_plot()
 
-                        # Reset dell'asse X e dei dati dello spettro per la nuova mappa
-                        state.LAST_SPECTRUM_X = np.array([])
-                        state.LAST_SPECTRUM_POL0 = np.array([])
-                        state.LAST_SPECTRUM_POL1 = np.array([])
 
                     # --- GENERAZIONE ASSE X (FREQUENZE) ---
                     # The X AXIS is generated only once
@@ -490,6 +467,7 @@ def _extract_skarab_nodding_data(filepath, spectrum_type, start_time_total):
             data_table_columns = hdul["DATA TABLE"].columns.names
             
             # --- LOGICA DI ESTRAZIONE SKARAB (come richiesto) ---
+
             
             if spectrum_type in ['spectra', 'simple']:
                 # Caso SPECTRA/SIMPLE: Dati in due canali (Ch0 e Ch1)
@@ -504,6 +482,12 @@ def _extract_skarab_nodding_data(filepath, spectrum_type, start_time_total):
                 # Caso STOKES: Tutti i dati sono in un unico canale (Ch0)
                 if 'Ch0' in data_table_columns:
                     data.append(np.array(hdul["DATA TABLE"].data["Ch0"]))
+                    # The above line oc code should be like (to be understood if each sub-spectrum is 1024 in lenght...):
+                    # data.append(np.array(hdul["DATA TABLE"].data["Ch0"][:, 0:1024]))
+                    # data.append(np.array(hdul["DATA TABLE"].data["Ch0"][:, 1024:2048]))
+                    # data.append(np.array(hdul["DATA TABLE"].data["Ch0"][:, 2048:3072]))
+                    # data.append(np.array(hdul["DATA TABLE"].data["Ch0"][:, 3072:4096]))
+
                 else:
                     print(f"SKARAB NODDING EXTRACT: Canale Ch0 non trovato per tipo '{spectrum_type}'.")
                     return None
@@ -521,6 +505,8 @@ def _extract_skarab_nodding_data(filepath, spectrum_type, start_time_total):
             # Creazione asse X (Canali)
             x = np.linspace(0, len(averages[0]), len(averages[0]))
             x_axis_label_val = 'Channel'
+
+
             
             return {
                 'averages': averages, 
@@ -547,8 +533,8 @@ def process_fits_file(filepath):
     extract its primary header, generates a plot, and emits both
     to the frontend via SocketIO. This function is called by fits_watcher.py.
     """
+    
     # Wait for the file to become stable (fully written)
-    # from "load_subscans" first index is the item number in the list, second index the value [0]=file name, [1] signal flag, [2]=time
     if not _wait_for_file_completion(filepath):
         print(f"Skipping processing of {os.path.basename(filepath)}: File did not stabilize or disappeared.")
         return
@@ -726,7 +712,35 @@ def process_skarab_nodding_pair(filepaths_tuple, common_prefix, feed_A_id, feed_
     freq = primary_header_data["frequency"]
     lo =  primary_header_data["lo"] 
     bw = primary_header_data["bandwidth"]
+
+    feeds = [feed_A_id, feed_B_id]
+
+    # Calcolo frequenze per l'asse superiore
+    f_min_val = float(freq)
+    f_max_val = f_min_val + float(bw)
+
+    x = np.linspace(0, len(final_averages[0]), len(final_averages[0]))
+
+    # Caricamento nel dizionario condiviso
+    state.CURRENT_SPEC.update({
+        'x': x,               # Canali (0..65535)
+        'averages': final_averages, # Lista di array delle polarizzazioni
+        'f_min': f_min_val,   # Inizio banda MHz
+        'f_max': f_max_val,   # Fine banda MHz
+        'filename': common_prefix,
+        'legend_labels': [f"Feed {f}" for f in feeds],
+        'spectrum_type': spectrum_type,
+        'updated': True       # Notifica il server
+    })
+
+    set_tab_labels(spectrum_type)
+
+   
+
+    #state.CURRENT_SPEC['updated'] = True
          
+
+    '''
     # 5. GENERAZIONE PLOT (Contiene i Timer 2 e 3)
     # L'argomento start_time_total viene usato qui per calcolare il tempo totale finale
     plot_url = _plot_and_save_skarab_nodding_html(
@@ -742,34 +756,38 @@ def process_skarab_nodding_pair(filepaths_tuple, common_prefix, feed_A_id, feed_
         lo,
         bw
     )
+    '''
+    
 
 
+    
     # 6. Emissione SocketIO
-    if plot_url and _socketio_instance:
+    # if plot_url and _socketio_instance:
+    if _socketio_instance:
          
-         # --- UTILIZZO DEI DATI PASSATI ---
-         # Usiamo il dizionario header_data gi� passato.
-         # Aggiungiamo o modifichiamo i campi per riflettere lo stato di "Nodding Pair".
-         
-         # L'header reale � gi� contenuto in primary_header_data['header']
-         final_data_to_emit = primary_header_data.copy()
-         final_data_to_emit['filename'] = f"Nodding Pair: {common_prefix} (Feeds {feed_A_id}, {feed_B_id})"
-         final_data_to_emit['plot_url'] = plot_url
-         final_data_to_emit['feeds'] = f"[{feed_A_id}, {feed_B_id}]"
-         final_data_to_emit['backend'] = BACKEND
-         final_data_to_emit['spectrum'] = spectrum_type
-         
-         # Modifica l'header stesso per aggiungere un commento sul Nodding
-         if 'header' in final_data_to_emit:
+        # --- UTILIZZO DEI DATI PASSATI ---
+        # Usiamo il dizionario header_data gi� passato.
+        # Aggiungiamo o modifichiamo i campi per riflettere lo stato di "Nodding Pair".
+        
+        # L'header reale � gi� contenuto in primary_header_data['header']
+        final_data_to_emit = primary_header_data.copy()
+        final_data_to_emit['filename'] = f"Nodding Pair: {common_prefix} (Feeds {feed_A_id}, {feed_B_id})"
+        # final_data_to_emit['plot_url'] = plot_url
+        final_data_to_emit['feeds'] = f"[{feed_A_id}, {feed_B_id}]"
+        final_data_to_emit['backend'] = BACKEND
+        final_data_to_emit['spectrum'] = spectrum_type
+        
+        # Modifica l'header stesso per aggiungere un commento sul Nodding
+        if 'header' in final_data_to_emit:
             # Sovrascrive/Aggiunge il commento per chiarire
             final_data_to_emit['header']['COMMENT'] = "Dati Nodding Pair (Unificazione Feeds A+B)"
-         
-         
-         _socketio_instance.start_background_task(
-             _socketio_instance.emit, 'fits_header_update', final_data_to_emit
-         )
-         
-         print(f"NODDING: Emesso header e plot URL per la coppia {common_prefix}.")
+            
+            
+            _socketio_instance.start_background_task(
+                _socketio_instance.emit, 'fits_header_update', final_data_to_emit
+            )
+            
+            print(f"NODDING: Emesso header e plot URL per la coppia {common_prefix}.")
     
     
     """
@@ -1040,22 +1058,22 @@ def trigger_gridding_process():
 
 def extract_metadata_and_filter(filepath: str, hdul: fits.HDUList) -> tuple[Dict[str, Any] | None, bool]:
     """
-    Estrae tutti i metadati FITS, determina l'acquisizione, e filtra
-    se il file non contiene dati per il feed selezionato dall'utente.
+    Extracts all FITS metadata, determines the acquisition, and filters
+    out files that do not contain data for the feed selected by the user.
 
-    Ritorna: 
-    - (header_data, should_process): Dizionario con i metadati OPPURE None, e un flag
-                                     che indica se l'elaborazione deve continuare.
+    Returns:
+    - (header_data, should_process): A dictionary with the metadata OR None, and a flag
+                                     indicating whether processing should continue.
     """
     
     header = hdul[0].header
     filename = os.path.basename(filepath)
     filename_extension = os.path.splitext(filename)[1]
 
-    # Recuperiamo il valore grezzo e portiamolo in maiuscolo per il confronto
+    # Retrieve the raw value and convert it to uppercase for comparison
     raw_spectrum = str(hdul["SECTION TABLE"].data["type"][0]).upper()
 
-    # Applichiamo la logica: FULL se STOKES, altrimenti DUAL
+    # Apply the logic: FULL if STOKES, otherwise DUAL
     polarization_value = "FULL" if raw_spectrum == "STOKES" else "DUAL"
 
     header_data = {
@@ -1070,21 +1088,28 @@ def extract_metadata_and_filter(filepath: str, hdul: fits.HDUList) -> tuple[Dict
         "spectrum": str(hdul["SECTION TABLE"].data["type"][0]) # conterrà 'simple', 'spectra', 'stokes'
     }
          
-    # STEP 0  - get the number of feeds used during the acquisition. This allows to check the type of acquisition:
-    #   1 feed  - mono feed (as in the position switching)
-    #   2 feeds - dual feed (as in the nodding mode)
+    # Get the number of feeds used during the acquisition. This allows to check the type of acquisition:
+    #   1 feed  - mono feed (as in 'position switching')
+    #   2 feeds - dual feed (as in 'nodding mode')
     # > 2 feeds - multi feed
 
     # Extract the feed number
     acq_feeds = []
     acq_type = ""
-    acq_feeds = hdul["RF INPUTS"].data["feed"] # In 'spectra' type we get the same feed value for LL and RR
-    # Prepare the list of feeds with unique numbers
+
+    # All feeds relative to the receiver used can be read out from:
+    # feeds = hdul["FEED TABLE"].data["id"]
+
+    # However, the only feeds used to acquire the data are indeicated in 'hdul["RF INPUTS"].data["feed"]'
+    # For 'simple' and 'spectra' spectrum type we get two rows per feed for pol LL and RR -> i.ei feed number duplicated
+    acq_feeds = hdul["RF INPUTS"].data["feed"] 
+    # Get unique feed numbers
     acq_feeds_unique_values = sorted(set(acq_feeds))
+    # Construct a string containing the feeds used during the acquisition abd update the header dictionary
     acq_feeds_str = "[" + ",".join(str(x) for x in acq_feeds_unique_values) + "]"
     header_data["feeds"] = str(acq_feeds_str)
     
-    # store the acq_type
+    # Get the number of feeds used, deduce the type of acquisition and update the header 
     num_unique_feeds = len(acq_feeds_unique_values)
     if num_unique_feeds == 1: header_data["acq_type"] = "MONO"
     elif num_unique_feeds == 2: header_data["acq_type"] = "DUAL"
@@ -1092,21 +1117,23 @@ def extract_metadata_and_filter(filepath: str, hdul: fits.HDUList) -> tuple[Dict
 
     acq_type = header_data["acq_type"]
 
-    # Get the backend type
+    # Get the backend type (i.e. TotalPower, SARDARA, SKARAB)
     # Get the feed number relative to file and according to the backend type
     # .fits0 .i.e. multi-feed we extract the feed number from the file extension
     # .fits 
     # - if the backend is SARDARA or TOTAL POWER, we extract the feed from the RF INPUTS table
     # - if the backend is SKARAB, we extract the feed number from the file name
     # Once the feed value is extrated, allow the process only for the feed selected by the user on the front-end
-    # This approach avoids to pre-process data relative to feeds not selected by the user
+    # This approach avoids to pre-process data relative to feeds not selected by the user   
+   
+    feeds_relative_to_file = [] # it contains the feeds whose data are included in the fits file 
+
+    # To recognize the TotalPower backend it is enough to check, within the SECTION TABLE, that 
+    # the number of 'bins' is equal to 1 or the 'type' is 'simple')
     chs = hdul["SECTION TABLE"].data["bins"][0]
     header_data["bins"] = chs
-    # Get the backend type (i.e. TotalPower, SARDARA, SKARAB)
-    # To recognize the TotalPower backend it is enough to check that the number of bins (i.e. chs) is equal to 1 (or spectra type 'SIMPLE')
 
-    feeds_relative_to_file = [] # these are the feeds whose data are included in the fits file 
-
+    # case: TotalPower
     if(chs == 1):
 
         header_data["backend"] = "TotalPower"
@@ -1122,22 +1149,23 @@ def extract_metadata_and_filter(filepath: str, hdul: fits.HDUList) -> tuple[Dict
 
     else:
 
-        if("FEED_" in str(filepath)): # case SKARAB backend
+        # case: SKARAB 
+        # the filename produced by SKARAB contains 'FEED_'
+        if("FEED_" in str(filepath)): 
             
             header_data["backend"] = "SKARAB"
-            # Extract the feed number relative to the file (20241024-150917-S0000-W3OH_001_005_FEED_0.fits)
+            # Extract the feed number relative to the file (ex: 20241024-150917-S0000-W3OH_001_005_FEED_0.fits)
             match = re.search(r"FEED_(\d+)", filename)
             if match:
                 feed_number = int(match.group(1))
                 # print(feed_number) 
                 feeds_relative_to_file.append(feed_number)       
 
-        else: # case SARDARA backend
+        # case: SARDARA
+        else: 
             
             header_data["backend"] = "SARDARA"
-            # case .fits file i.e. case mono-feed or dual-feed (nodding)
-            # case .fits are TotalPower, SARDARA (excluding multi-feed) and SKARAB
-            # get the feed relative to the file  
+          
             if(filename_extension == '.fits'):  # case MONO-feed or DUAL-feed
                 
                 feeds_relative_to_file = acq_feeds_unique_values
@@ -1147,121 +1175,115 @@ def extract_metadata_and_filter(filepath: str, hdul: fits.HDUList) -> tuple[Dict
                 # Retrieve the feed number from the extension itself
                 feeds_relative_to_file.append(filename_extension.removeprefix('.fits'))
                         
+    print('*** List of feeds used for acquisition and listed in the RF INPUTS table:',  acq_feeds_unique_values)
+    print('*** List of feeds used for acquisition and extracted from filename:', feeds_relative_to_file) # case .fits# and SKARAB
 
-    print('*** List of feeds relative to acquisition:',  acq_feeds_unique_values)
-    print('*** List of feeds relative to file:', feeds_relative_to_file)
-
-    # We process data only if the fits file has data related to the feed selected by the user in the front-end
-    # Get the feed selected by the user
+    # Process data only for FITS file containing data relative to the feed selected by the user in the front-end
+    # Get the feed selected by the user in the front-end
     selected_feed_str = str(state.CURRENT_SELECTED_FEED)
     # Convert unique_values in a string for omogeneous comparison
     if(acq_type == "DUAL" and header_data["backend"] == "SKARAB"):
 
         unique_values_str = [str(x) for x in acq_feeds_unique_values] 
 
-    else:
+    else: # According to the acq_type MONO or MULTI, feeds_relative_to_file is taken from acq_feeds_unique_values or from the file name
 
         unique_values_str = [str(x) for x in feeds_relative_to_file] 
-            
-    # Process data only if feed contained in the fits file coincide with that selected one by he user
 
     header_data["feeds_relative_to_file"] = unique_values_str
 
-
+    # case: FITS file will not be processed
     if selected_feed_str not in unique_values_str: 
         
         print(f"PROCESSOR FILTER: File discarded: {filename}. Selected Feed ({selected_feed_str}) not found in those listed in the fits file ({acq_feeds_str}).")
-        return None, False # File will not be processed
+        return None, False # FITS file will not be processed
     
+    # Extract header data
     for keyword, value in header.items():
         if keyword not in ['COMMENT', 'HISTORY']:
-            # 1. Conserviamo il valore originale per le conversioni
+            # 1. Preserve the original value for conversions
             processed_value = str(value)
 
-            # 2. Intercettiamo le keyword astronomiche
+            # 2. Intercept astronomical keywords
             if keyword == 'RightAscension':
-                # Passiamo il float alla funzione e otteniamo la stringa nobile
+                # Pass the float to the function and get the string in hms format
                 processed_value = rad_to_hms_string(float(value))
             
             elif keyword == 'Declination':
-                # Passiamo il float alla funzione e otteniamo la stringa nobile
+                # Pass the float to the function and get the string in dms format
                 processed_value = rad_to_dms_string(float(value))
 
-        # 3. Salviamo nel dizionario
+        # 3. Save the value inside the dictionary
         header_data["header"][keyword] = processed_value
-        print(f"{keyword}: {processed_value}")
+        # Print the value of the current keyword 
+        # print(f"{keyword}: {processed_value}")
 
-    # Leggi la sorgente dal FITS attuale
+    # Read the schedule name from the FITS file
     schedule_name = header_data["header"]["ScheduleName"]
 
-    # CONFRONTO: se la sorgente � diversa da quella salvata in state...
+    # Update the flag if schedule name is different as compared to the saved one
     if  schedule_name != state.CURRENT_SCHEDULE:
-        state.CURRENT_SCHEDULE = schedule_name  # Aggiorna lo stato con la nuova
-        state.IS_NEW_DATASET = True              # Alza il flag per Bokeh
+        state.CURRENT_SCHEDULE = schedule_name  # Update the schedule name with the new one
+        state.IS_NEW_DATASET = True             # Set the flag to True for Bokeh
         print(f"PROCESSOR: Cambio sorgente rilevato -> {schedule_name}")
     else:
-        # Se � uguale, assicuriamoci che il flag sia False (importante!)
+        # Keep the flag to False is the current schedule name is equal to the stored one
         state.IS_NEW_DATASET = False
-      
-    #for keyword, value in header.items():
-    #    if keyword not in ['COMMENT', 'HISTORY']:
-    #        print(f"{keyword}: {value}")
-    #        header_data["header"][keyword] = str(value)
 
-    print("--------------------------------------------------\n")
-
-    # Keyword aggiuntive da HduTables
+    # Additional keywords to be added from hdul
     try:
-        sec = hdul["SECTION TABLE"].data[0]
+        sec = hdul["SECTION TABLE"].data[0] # get first raw of data from the SECTION TABLE
         header_data["bins"] = str(sec["bins"])
         header_data["bandwidth"] = str(sec["bandwidth"])
         
-        rf = hdul["RF INPUTS"].data[0] # Assumiamo la prima riga ?? sufficiente per questi valori
+        rf = hdul["RF INPUTS"].data[0] # get first raw of data from RF INPUTS table
         header_data["frequency"] = str(rf["frequency"])
         header_data["lo"] = str(rf["localOscillator"])
+
+        # get the subscan type. The value allows to discriminate between maps and simple spectra
         header_data["sub_scan_type"] = header_data["header"].get("SubScanType") # Gi?? pulito in step 3
     
     except Exception as e:
         
         print(f"Attention - error while extracting values from extension tables: {e}")
     
-    return header_data, acq_feeds_unique_values,True # Tutto ?? OK, processa 
+    return header_data, acq_feeds_unique_values,True # the flag True allows to process data and display the plot 
 
 
 
-
-
-# FITS_processor.py (Nuova funzione)
 def _extract_coordinates_for_map(hdul, sub_scan_type) -> Tuple[np.ndarray, np.ndarray]:
-    """Estrae le coordinate X e Y (RA/DEC o AZ/EL) in base al tipo di scansione."""
+    
+    """Extract the X and Y coordinates (RA/DEC or AZ/EL) based on the scan type"""
     
     if sub_scan_type == 'RA' or sub_scan_type == 'DEC':
-        # Assumiamo RA/DEC come (X, Y)
+        # Assume RA/DEC as (X, Y)
         x_data = np.array(hdul["DATA TABLE"].data["raj2000"])
         y_data = np.array(hdul["DATA TABLE"].data["decj2000"])
         return x_data, y_data
         
     elif sub_scan_type == 'AZ' or sub_scan_type == 'EL':
-        # Assumiamo AZ/EL come (X, Y)
+        # Assume AZ/EL as (X, Y)
         x_data = np.array(hdul["DATA TABLE"].data["az"])
         y_data = np.array(hdul["DATA TABLE"].data["el"])
         return x_data, y_data
 
     else:
-        # Se is_map era True ma il sub_scan_type � inatteso, 
-        # restituiamo array vuoti per evitare errori di grigliatura.
-        print(f"AVVISO GRAVE: SubScanType '{sub_scan_type}' non gestito per le mappe.")
+        # if 'is_map' is 'True' but the sub_scan_type is unexpected, 
+        # return empty arrays to avoid gridding errors
+        print(f"CRITICAL ERROR: SubScanType '{sub_scan_type}' not managed for maps.")
         return np.array([]), np.array([])
 
 
 
 def rad_to_hms_string(rad):
-    """Converte radianti in stringa HHh MMm SSs (per RA)"""
+
+    """Converts radians to a string DD° MM' SS" (for RA, AZ)"""
+    
     if rad is None or np.isnan(rad): return "--"
     
-    # Normalizza tra 0 e 2pi
+    # Normalize between 0 and 2pi
     rad = rad % (2 * np.pi)
-    # Converti in ore decimali (2pi rad = 24h)
+    # Convert in decimal hours (2pi rad = 24h)
     hours_dec = rad * (12.0 / np.pi)
     
     h = int(hours_dec)
@@ -1273,10 +1295,12 @@ def rad_to_hms_string(rad):
 
 
 def rad_to_dms_string(rad):
-    """Converte radianti in stringa �DD� MM' SS" (per DEC, AZ, EL)"""
+    
+    """Converts radians to a string DD° MM' SS" (for DEC, EL)"""
+    
     if rad is None or np.isnan(rad): return "--"
     
-    # Converti in gradi decimali
+    # Convert to decimal degrees
     deg_dec = np.degrees(rad)
     
     sign = "+" if deg_dec >= 0 else "-"
@@ -1286,6 +1310,39 @@ def rad_to_dms_string(rad):
     m = int((deg_dec - d) * 60)
     s = (deg_dec - d - m/60) * 3600
     
-    # Usiamo \u00b0 per il simbolo del grado (sicurezza encoding)
+    # Use \u00b0 for the degree symbol (encoding safety)
     return f"{sign}{d:02d}\u00b0 {m:02d}' {s:05.2f}\""
   
+
+
+def reset_dashboard():
+    
+    # This method reset the dashboard which contain the map and the spectrum in time
+    # ----------------------------------------------------
+    # ?? This is the reset logic for the map
+    # ----------------------------------------------------
+
+    # We verify if Pol0 (or any other Pol) contains data
+    if state.GLOBAL_MAP_CACHE['Pol0']['X'].size > 0:
+        print(">>> Cahne of modality Dashboard/Single Spectrum detected. Reset Map CACHE.")
+        # Call the reset function from the state.py module
+        state.initialize_map_cache()
+
+    # We add this important check for the scatter plot:
+    if state.USE_SCATTER_MODE:
+        reset_scatter_plot()
+       
+    # Reset of the X-axis values and data of the spectrum in time
+    state.LAST_SPECTRUM_X = np.array([])
+    state.LAST_SPECTRUM_POL0 = np.array([])
+    state.LAST_SPECTRUM_POL1 = np.array([])
+
+
+
+def set_tab_labels(spectrum_type):
+
+    # This method set the correct description of each tab label in the spectrum according to the spectrum_type(simple, spectra and stokes)
+    if spectrum_type == 'spectra' or 'simple':
+        state.CURRENT_SPEC['tab_labels'] = ["LEFT (LCP)", "RIGHT (RCP)"]
+    elif spectrum_type == 'stokes':
+        state.CURRENT_SPEC['tab_labels'] = ["Stokes I", "Stokes Q", "Stokes U", "Stokes V"]
