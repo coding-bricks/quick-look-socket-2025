@@ -1,6 +1,7 @@
 # bokeh_server.py
 
 import threading
+import time
 from bokeh.plotting import curdoc
 from bokeh.application import Application
 from bokeh.application.handlers.function import FunctionHandler
@@ -10,6 +11,8 @@ import numpy as np # Importa NumPy
 from typing import Dict, Any, List, Optional
 from threading import Thread
 from bokeh.models import Panel
+
+
 
 # Importa i tuoi moduli: stato globale, visualizzazioni e Worker B
 import state
@@ -72,6 +75,10 @@ def update_spectrum_plot():
 
     def safe_update():
         try:
+
+            t_start = time.time()
+
+
             # --- 1. CONFIGURAZIONE E BOLEANI ---
             is_stokes = (data.get('spectrum_type') == 'stokes')
             is_simple = (data.get('spectrum_type') == 'simple')
@@ -167,6 +174,10 @@ def update_spectrum_plot():
             # --- 4. AGGIORNAMENTO INTERFACCIA ---
             doc_state['tabs_container'].tabs = new_tabs
             state.CURRENT_SPEC['updated'] = False
+
+            t_end = time.time()
+            print(f"Bokeh update elapsed: {t_end - t_start:.3f} s")            
+
 
         except Exception as e:
             print(f"BOKEH UPDATE ERROR: {e}")

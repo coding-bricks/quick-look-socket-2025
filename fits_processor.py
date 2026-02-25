@@ -217,6 +217,10 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
             # Update the spectrum type i.e. 'simple', 'spectra', 'stokes'
             state.SPECTRUM_TYPE = spectrum_type
 
+            end_time_io = time.time()
+            print(f"PROFILING: [Timer 0] I/O Disco + Data Extraction {end_time_io - start_time_io_calc:.4f} secondi.")
+
+
             if data:
 
                 if not is_map:
@@ -257,6 +261,12 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                     f_min_val = float(freq)
                     f_max_val = f_min_val + float(bw)
 
+                    # ----------------------------------------------------------------------
+                    # TIMER 1: Tempo di I/O Disco (fits.open/hdul.data) e Calcolo Media (np.mean)
+                    end_time_io_calc = time.time()
+                    print(f"PROFILING: [Timer 1] Calcolo Media completato in {end_time_io_calc - end_time_io:.4f} secondi.")
+
+
                     # Caricamento nel dizionario condiviso
                     state.CURRENT_SPEC.update({
                         'x': x,               # Canali (0..65535)
@@ -291,10 +301,7 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
 
                     print("---------------------------------")
 
-                    # ----------------------------------------------------------------------
-                    # TIMER 1: Tempo di I/O Disco (fits.open/hdul.data) e Calcolo Media (np.mean)
-                    end_time_io_calc = time.time()
-                    print(f"PROFILING: [Timer 1] I/O Disco + Calcolo Media completato in {end_time_io_calc - start_time_io_calc:.4f} secondi.")
+                   
 
                     #return _plot_and_save_html(PLOT_SAVE_DIR, filepath, filename_prefix, filename_extension, feeds, chs, spectrum_type, 
                     #    backend, x_axis_label_val, x, averages, feed_number, start_time_total, freq, lo, bw)
@@ -303,6 +310,7 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
 
             
                     state.IS_MAP = True
+
 
                     # If the subscan number is smaller or equal than that stored in the state.py 
                     # the map is re-initialized because we are starting with a new map
@@ -434,6 +442,12 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                         
                     # --- SUCCESSIVAMENTE: ATTIVAZIONE GRIGLIATORE ASINCRONO (Worker B) ---
                     # worker_b.trigger_regridding()
+
+                 # ----------------------------------------------------------------------
+                # TIMER 2: Tempo di I/O Disco (fits.open/hdul.data) e Calcolo Media (np.mean)
+                end_time_bokeh = time.time()
+                print(f"PROFILING: [Timer 2] Visualizzazione Bokeh in {end_time_bokeh - end_time_io_calc:.4f} secondi.")
+
                         
                 # fine blocco if not is_map / else    
                 # Update subscan number to state.py
@@ -496,6 +510,9 @@ def _extract_skarab_nodding_data(filepath, spectrum_type, start_time_total):
                  print(f"SKARAB NODDING EXTRACT: Tipo di spettro '{spectrum_type}' non gestito.")
                  return None
 
+        load_data_time = time.time()
+        print(f"PROFILING: [Timer 0] Loading data in {load_data_time - start_time_total:.4f} secondi.")
+
         if data and data[0].ndim == 2:
             # Calcolo della media lungo l'asse del tempo (axis=0)
             for item in data:
@@ -506,6 +523,10 @@ def _extract_skarab_nodding_data(filepath, spectrum_type, start_time_total):
             x = np.linspace(0, len(averages[0]), len(averages[0]))
             x_axis_label_val = 'Channel'
 
+            avg_data_time = time.time()
+            print(f"PROFILING: [Timer 1] data averaged in {avg_data_time - load_data_time:.4f} secondi.")
+
+
 
             
             return {
@@ -513,7 +534,8 @@ def _extract_skarab_nodding_data(filepath, spectrum_type, start_time_total):
                 'x': x, 
                 'x_axis_label_val': x_axis_label_val, 
                 'spectrum_type': spectrum_type,
-                'start_time_total': start_time_total # Utile per il logging finale
+                #'start_time_total': start_time_total # Utile per il logging finale
+                'start_time_total': avg_data_time - load_data_time # Utile per il logging finale
             }
             
         else:
@@ -542,14 +564,27 @@ def process_fits_file(filepath):
     try:
         with fits.open(filepath) as hdul:
 
-            print(f"\n--- Primary Header Keywords and Values for {os.path.basename(filepath)} ---")
-
-            # ?? NUOVA LOGICA: ESTRAZIONE E FILTRO ??
-            header_data, acq_feeds_unique_values, should_process = extract_metadata_and_filter(filepath, hdul)
-
+            
+            # This function allow to process files only relative to the feed selected by the user
+            acq_feeds_unique_values, acq_feeds_str, unique_values_str, acq_type, backend_name, should_process = filter_file_for_selected_feed(filepath, hdul)
+            
             if not should_process:
                 return # File scartato dal filtro feed
+        
+            print(f"\n--- Extraction of Primary Header Keywords and Values for {os.path.basename(filepath)} ---")
 
+            header_data, acq_feeds_unique_values = extract_metadata(filepath, hdul,  acq_feeds_unique_values, acq_feeds_str, unique_values_str, acq_type, backend_name)
+
+            #print('****acq_feeds_unique_values****', type(acq_feeds_unique_values))
+            
+
+            # ?? NUOVA LOGICA: ESTRAZIONE E FILTRO ??
+            #header_data, acq_feeds_unique_values, should_process = extract_metadata_and_filter(filepath, hdul)
+
+            #print('****acq_feeds_unique_values****', type(acq_feeds_unique_values))
+
+            #if not should_process:
+            #    return # File scartato dal filtro feed
 
             # ----------------------------------------------------------------------
             # ?? PUNTO DI DISCRIMINAZIONE E INOLTRO AL NODDING MANAGER
@@ -682,10 +717,6 @@ def process_skarab_nodding_pair(filepaths_tuple, common_prefix, feed_A_id, feed_
         print(f"Errore estrazione dati B per {common_prefix}")
         return
     
-    end_time_io_calc = time.time()
-    print(f"PROFILING: [Timer 1 NODDING] I/O Disco + Calcolo Media completato in {end_time_io_calc - start_time_io_calc:.4f} secondi.")
-    # ----------------------------------------------------------------------
-    
 
     # 3. UNIFICAZIONE DEI DATI
     # averages_A = [A_Ch0, A_Ch1] o [A_Ch0]. averages_B = [B_Ch0, B_Ch1] o [B_Ch0]
@@ -735,6 +766,11 @@ def process_skarab_nodding_pair(filepaths_tuple, common_prefix, feed_A_id, feed_
 
     set_tab_labels(spectrum_type)
 
+    end_time_io_calc = time.time()
+    #print(f"PROFILING: [Timer 1 NODDING] I/O Disco + Calcolo Media completato in {end_time_io_calc - start_time_io_calc:.4f} secondi.")
+    print(f"PROFILING: [Timer 2 NODDING] Visualizzazione Bokeh in {end_time_io_calc - start_time_io_calc:.4f} secondi.")
+  
+    # ----------------------------------------------------------------------
    
 
     #state.CURRENT_SPEC['updated'] = True
@@ -1056,6 +1092,107 @@ def trigger_gridding_process():
 
 
 
+def extract_metadata(filepath: str, hdul: fits.HDUList, acq_feeds_unique_values, acq_feeds_str, unique_values_str, acq_type, backend_name):
+    """
+    Extracts all FITS metadata.
+
+    Returns:
+    - header_data: A dictionary with the metadata OR None.
+    """
+
+    header = hdul[0].header
+    filename = os.path.basename(filepath)
+    filename_extension = os.path.splitext(filename)[1]
+
+    # Retrieve the raw value and convert it to uppercase for comparison
+    raw_spectrum = str(hdul["SECTION TABLE"].data["type"][0]).upper()
+
+    # Apply the logic: FULL if STOKES, otherwise DUAL
+    polarization_value = "FULL" if raw_spectrum == "STOKES" else "DUAL"
+
+    header_data = {
+        "filename": filename,
+        "filename_extension": filename_extension,
+        "header": {}, 
+        "feeds": "[]", 
+        "acq_type": "UNKNOWN", 
+        "backend": "UNKNOWN", 
+        "feeds_relative_to_file": [],
+        "mode": polarization_value, # conterrà FULL o DUAL 
+        "spectrum": str(hdul["SECTION TABLE"].data["type"][0]) # conterrà 'simple', 'spectra', 'stokes'
+    }
+
+    header_data["acq_type"] = acq_type
+    header_data["backend"] = backend_name
+    header_data["feeds"] = str(acq_feeds_str)
+    header_data["feeds_relative_to_file"] = unique_values_str
+    
+    chs = hdul["SECTION TABLE"].data["bins"][0]
+    header_data["bins"] = chs
+
+    # Extract header data
+    for keyword, value in header.items():
+        if keyword not in ['COMMENT', 'HISTORY']:
+            # 1. Preserve the original value for conversions
+            processed_value = str(value)
+
+            # 2. Intercept astronomical keywords
+            if keyword == 'RightAscension':
+                # Pass the float to the function and get the string in hms format
+                processed_value = rad_to_hms_string(float(value))
+            
+            elif keyword == 'Declination':
+                # Pass the float to the function and get the string in dms format
+                processed_value = rad_to_dms_string(float(value))
+
+        # 3. Save the value inside the dictionary
+        header_data["header"][keyword] = processed_value
+        # Print the value of the current keyword 
+        # print(f"{keyword}: {processed_value}")
+
+    # Read the schedule name from the FITS file
+    schedule_name = header_data["header"]["ScheduleName"]
+
+    # Update the flag if schedule name is different as compared to the saved one
+    if  schedule_name != state.CURRENT_SCHEDULE:
+        state.CURRENT_SCHEDULE = schedule_name  # Update the schedule name with the new one
+        state.IS_NEW_DATASET = True             # Set the flag to True for Bokeh
+        
+        # --- RESET ATOMICO DELLO STATO SPETTRALE ---
+        # Svuotiamo i dati vecchi cos� Bokeh riceve l'input di pulizia
+        state.CURRENT_SPEC['x'] = np.array([])
+        state.CURRENT_SPEC['averages'] = []
+        state.CURRENT_SPEC['filename'] = f"RESETTING: {schedule_name}..."
+        state.CURRENT_SPEC['updated'] = True # Trigger immediato per il reset visivo
+        print(f"PROCESSOR: Cambio sorgente rilevato -> {schedule_name}")
+    else:
+        # Keep the flag to False is the current schedule name is equal to the stored one
+        state.IS_NEW_DATASET = False
+
+    # Additional keywords to be added from hdul
+    try:
+        sec = hdul["SECTION TABLE"].data[0] # get first raw of data from the SECTION TABLE
+        header_data["bins"] = str(sec["bins"])
+        header_data["bandwidth"] = str(sec["bandwidth"])
+        
+        rf = hdul["RF INPUTS"].data[0] # get first raw of data from RF INPUTS table
+        header_data["frequency"] = str(rf["frequency"])
+        header_data["lo"] = str(rf["localOscillator"])
+
+        # get the subscan type. The value allows to discriminate between maps and simple spectra
+        header_data["sub_scan_type"] = header_data["header"].get("SubScanType") # Gi?? pulito in step 3
+    
+    except Exception as e:
+        
+        print(f"Attention - error while extracting values from extension tables: {e}")
+    
+    return header_data, acq_feeds_unique_values 
+    
+
+
+
+
+
 def extract_metadata_and_filter(filepath: str, hdul: fits.HDUList) -> tuple[Dict[str, Any] | None, bool]:
     """
     Extracts all FITS metadata, determines the acquisition, and filters
@@ -1312,6 +1449,145 @@ def rad_to_dms_string(rad):
     
     # Use \u00b0 for the degree symbol (encoding safety)
     return f"{sign}{d:02d}\u00b0 {m:02d}' {s:05.2f}\""
+
+
+
+def filter_file_for_selected_feed(filepath, hdul):
+
+    """
+    Extracts the feed value from the FITS file 
+    
+    Return: 
+    - False if the feed does not match the one selected by the user on the front-end - Data will not be processed
+    - True otherwise - Data will be passed to the processor
+    """
+
+    # For data acquired with one (as for Position Switching) or two feeds (as for the Nodding),
+    # feed values can be extracted from the RF INPUTS table.
+    # For data acquired in multi-feed mode it is not possible to use the RF INPUTS table because
+    # all feeds are listed and would not be possible to understand which field is related to current the FITS file.
+    # In this case:
+    # - for SKARAB the feed is extracted from the file name 'FEED_x'
+    # - for SARDARA the feed is extracted from the extension of the .fits# file.
+    # - for TotalPower, the case is more complex because all feeds are saved in the .fits file since the amount of data is small
+    #   it looks like that for TotalPower there is no .fits# case
+    #   it means that in a MULTI .fits file with TotalPower, data are always available
+    #   In this case we extract the data considering the feed selected by the user
+    # Note:
+    # All feeds relative to the receiver used can be read out from:
+    # feeds = hdul["FEED TABLE"].data["id"]
+
+    filename = os.path.basename(filepath)
+    filename_extension = os.path.splitext(filename)[1]
+         
+    # Get the number of feeds used during the acquisition. This allows to check the type of acquisition:
+    #   1 feed  - mono feed (as in 'position switching')
+    #   2 feeds - dual feed (as in 'nodding mode')
+    # > 2 feeds - multi feed
+
+    # Extract the feed number
+    rf_feeds = []
+    acq_type = ""
+    backend_name = ""
+
+    # All feeds relative to the receiver used can be read out from:
+    # feeds = hdul["FEED TABLE"].data["id"]
+
+    # However, the only feeds used to acquire the data are indicated in 'hdul["RF INPUTS"].data["feed"]'
+    # The 'hdul["RF INPUTS"].data["feed"]' displays duplicated values for simple' and 'spectra' spectrum type (related to pol LL and RR)
+    # We get unique ffed values
+    rf_feeds = sorted(set(hdul["RF INPUTS"].data["feed"])) 
+   
+    # Construct a string containing the feeds used during the acquisition 
+    # This value will be used to update the header dictionary
+    acq_feeds_str = "[" + ",".join(str(x) for x in rf_feeds) + "]"
+    
+    # Get the number of feeds used, deduce the type of acquisition and update the header 
+    if len(rf_feeds) == 1: acq_type = "MONO"
+    elif len(rf_feeds) == 2: acq_type = "DUAL"
+    elif len(rf_feeds) > 2: acq_type = "MULTI"
+   
+    feeds_relative_to_file = [] # it contains the feeds whose data are included in the fits file 
+
+    # To recognize the TotalPower backend it is enough to check, within the SECTION TABLE 
+    # In this case, the number of 'bins' is equal to 1
+    chs = hdul["SECTION TABLE"].data["bins"][0]
+
+    # case: TotalPower
+    if(chs == 1):
+
+        backend_name = "TotalPower"
+        # get the feed relative to the file  
+        if(filename_extension == '.fits'):  # case MONO-feed, DUAL-feed, MULTI-feed
+                
+            # feeds_relative_to_file = rf_feeds
+            feeds_relative_to_file.append(int(state.CURRENT_SELECTED_FEED))
+        
+        else: # case multi-feed i.e. .fit0, .fits1 ...
+            
+            # For MULTI case, data of TotalPower relative to all feeds are small enough to be stored in the .fits file 
+            pass
+            # Retrieve the feed number from the extension itself
+            #feeds_relative_to_file.append(filename_extension.removeprefix('.fits'))
+
+    else:
+
+        if("FEED_" in str(filepath)): 
+            # case: SKARAB 
+            # the file produced by SKARAB contains the text 'FEED_' in its name
+            
+            backend_name = "SKARAB"
+            # Extract the feed number relative to the file (ex: 20241024-150917-S0000-W3OH_001_005_FEED_0.fits)
+            match = re.search(r"FEED_(\d+)", filename)
+            if match:
+                feed_number = int(match.group(1))
+                # print(feed_number) 
+                feeds_relative_to_file.append(feed_number)       
+
+        else:             
+            # case: SARDARA
+
+            backend_name = "SARDARA"
+          
+            if(filename_extension == '.fits'):  # case MONO-feed or DUAL-feed
+                
+                feeds_relative_to_file = rf_feeds
+        
+            else: # case multi-feed i.e. .fit0, .fits1 ...
+            
+                # Retrieve the feed number from the extension itself
+                feeds_relative_to_file.append(filename_extension.removeprefix('.fits'))
+                        
+    print('*** List of feeds used for acquisition and listed in the RF INPUTS table:',  rf_feeds)
+    print('*** List of feeds used for acquisition and extracted from filename:', feeds_relative_to_file) # case .fits# and SKARAB
+
+    # Process data only for FITS file containing data relative to the feed selected by the user in the front-end
+    # Get the feed selected by the user in the front-end
+    selected_feed_str = str(state.CURRENT_SELECTED_FEED)
+    # Convert unique_values in a string for omogeneous comparison
+    if(acq_type == "DUAL" and  backend_name == "SKARAB"):
+
+        unique_values_str = [str(x) for x in rf_feeds] 
+
+    else: # According to the acq_type MONO or MULTI, feeds_relative_to_file is taken from acq_feeds_unique_values or from the file name
+
+        unique_values_str = [str(x) for x in feeds_relative_to_file] 
+
+   
+    # case: FITS file will not be processed
+    if selected_feed_str not in unique_values_str: 
+        
+        print(f"PROCESSOR FILTER - File discarded: {filename}. Selected Feed ({selected_feed_str}) not found in those listed in the fits file ({acq_feeds_str}).")
+        return rf_feeds, acq_feeds_str, unique_values_str, acq_type, backend_name, False # FITS file will not be processed
+
+    else:
+
+        print(f"PROCESSOR FILTER - File accepted: {filename}.")
+        return rf_feeds, acq_feeds_str, unique_values_str, acq_type, backend_name, True # FITS file will not be processed
+    
+    
+    
+
   
 
 

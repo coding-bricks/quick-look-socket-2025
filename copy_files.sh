@@ -72,7 +72,7 @@ files_sar_nod=(
 destination="/home02/fabio.schirru/github/quick-look_2025_socket/fits_files/"
 
 # Copy each file every 10 seconds
-for file in "${files_sar_nod[@]}"; do
+for file in "${files[@]}"; do
   echo "Copying $file to $destination"
   cp "$file" "$destination"
   echo "Waiting 8 seconds before next copy..."
