@@ -264,12 +264,19 @@ def start_app():
     )
 
 
-if __name__ == '__main__':
+
+def main():
     try:
         start_app()
     except KeyboardInterrupt:
         print("\nApplication stopped by user.")
     finally:
+        global fits_observer
         if fits_observer:
             stop_fits_monitor(fits_observer)
             print("Application gracefully stopped.")
+
+if __name__ == "__main__":
+    main()
+
+
