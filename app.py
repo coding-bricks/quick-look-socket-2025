@@ -167,10 +167,7 @@ def start_app():
     elif is_user_mode:
         print("\n[MODE] USER MODE (-u): using username-based subdirectories\n")
     else:
-        print("\n[MODE] DEFAULT MODE: using base paths from config.ini\n")
-
-    state.initialize_map_cache()
-   
+        print("\n[MODE] DEFAULT MODE: using base paths from config.ini\n")  
 
     # 2. Load drive paths from config.ini
     drive_paths = _get_drive_paths_from_config()
@@ -220,6 +217,9 @@ def start_app():
     if not valid_paths:
         print("ERROR: No valid directories found to monitor. Check config.ini and mount points.")
         return
+
+    # 3.5 initialize the map_cash 
+    state.initialize_map_cache()
 
     # 4. Log the status of all drives
     _check_mounted_drives(drive_paths)
