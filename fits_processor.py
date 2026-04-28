@@ -308,9 +308,10 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
 
                 else: # is a map
 
+                    if(not state.IS_MAP):
             
-                    state.IS_MAP = True
-
+                        reset_dashboard()
+                        state.IS_MAP = True
 
                     # If the subscan number is smaller or equal than that stored in the state.py 
                     # the map is re-initialized because we are starting with a new map
@@ -318,15 +319,6 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
 
                         reset_dashboard()
                        
-
-
-
-                    # --- GENERAZIONE ASSE X (FREQUENZE) ---
-                    # The X AXIS is generated only once
-                    # Supponendo che tu abbia estratto freq (f_iniziale) e bw (larghezza banda) dall'header
-                    # e che 'chs' sia il numero di canali (es. 1024)
-
-                    
                 
                     if(spectrum_type == 'stokes'):
 
@@ -415,6 +407,9 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                         # Una volta calcolati entrambi, segnaliamo a Bokeh che pu� aggiornare
                         state.SPECTRUM_UPDATED = True
 
+                    # Get profiling time after computing averages
+                    end_time_io_calc = time.time()
+
                     # L'asse X in questo caso non � il canale, ma il Punto Campione (la riga)
                     # Questi P_i verranno poi accoppiati con RA/DEC.
                     x = np.linspace(0, len(averages[0]), len(averages[0]))
@@ -465,6 +460,14 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
 
 
 def _extract_skarab_nodding_data(filepath, spectrum_type, start_time_total):
+
+
+    if(state.IS_MAP):
+
+        reset_dashboard() # The dashboard is composed by the map and the spectrum in time
+        state.IS_MAP = False
+
+
     """
     Estrae i dati (Ch0 e/o Ch1) da un singolo file SKARAB Nodding e calcola le medie.
     La logica dipende dal tipo di spettro (SPECTRA/SIMPLE vs STOKES).
@@ -1595,8 +1598,9 @@ def reset_dashboard():
     
     # This method reset the dashboard which contain the map and the spectrum in time
     # ----------------------------------------------------
-    # ?? This is the reset logic for the map
+    # This is the reset logic for the map
     # ----------------------------------------------------
+    print(">>> Change of modality Dashboard/Single Spectrum detected. Reset Map CACHE.")
 
     # We verify if Pol0 (or any other Pol) contains data
     if state.GLOBAL_MAP_CACHE['Pol0']['X'].size > 0:

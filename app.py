@@ -154,6 +154,23 @@ def start_app():
 
     # 1. Parse command-line arguments
     is_debug_mode = '-d' in sys.argv
+    is_user_mode = '-u' in sys.argv
+
+    # --- Check for incompatible flags ---
+    if is_debug_mode and is_user_mode:
+        print("ERROR: Options '-d' (debug) and '-u' (user mode) cannot be used together.")
+        sys.exit(1)
+
+    # --- Log operating mode ---
+    if is_debug_mode:
+        print("\n[MODE] DEBUG MODE (-d): using local drive\n")
+    elif is_user_mode:
+        print("\n[MODE] USER MODE (-u): using username-based subdirectories\n")
+    else:
+        print("\n[MODE] DEFAULT MODE: using base paths from config.ini\n")
+
+    state.initialize_map_cache()
+   
 
     # 2. Load drive paths from config.ini
     drive_paths = _get_drive_paths_from_config()
@@ -170,22 +187,35 @@ def start_app():
             valid_paths.append(os.path.abspath(monitor_path))
             print(f"Starting in DEBUG MODE. Monitoring local drive: {monitor_path}")
     else:
-        # Determine the authenticated username for production subdirectories
-        username = None
-        try:
-            username = os.getlogin()
-        except OSError:
-            username = os.getenv('USER') or os.getenv('USERNAME')
+        if is_user_mode:
+            # --- USER-BASED MODE ---
+            # Determine the authenticated username for production subdirectories
+            username = None
+            try:
+                username = os.getlogin()
+            except OSError:
+                username = os.getenv('USER') or os.getenv('USERNAME')
 
-        # Collect all configured remote drives
-        for drive_key, base_path in drive_paths.items():
-            if drive_key.startswith('remote_drive'):
-                full_path = os.path.join(base_path, username) if username else base_path
-                if os.path.isdir(full_path):
-                    valid_paths.append(os.path.abspath(full_path))
-                    print(f"Adding to monitor list: {full_path}")
-                else:
-                    print(f"Drive '{drive_key}' path not found/accessible: {full_path}")
+            # Collect all configured remote drives
+            for drive_key, base_path in drive_paths.items():
+                if drive_key.startswith('remote_drive'):
+                    full_path = os.path.join(base_path, username) if username else base_path
+                    if os.path.isdir(full_path):
+                        valid_paths.append(os.path.abspath(full_path))
+                        print(f"Adding to monitor list: {full_path}")
+                    else:
+                        print(f"Drive '{drive_key}' path not found/accessible: {full_path}")
+        
+        else:
+            # --- DEFAULT MODE ---
+            # Extract the base path directly from the config.ini file
+            for drive_key, base_path in drive_paths.items():
+                if drive_key.startswith('remote_drive'):
+                    if os.path.isdir(base_path):
+                        valid_paths.append(os.path.abspath(base_path))
+                        print(f"[DEFAULT MODE] Adding base path: {base_path}")
+                    else:
+                        print(f"[DEFAULT MODE] Path not found/accessible: {base_path}")
 
     if not valid_paths:
         print("ERROR: No valid directories found to monitor. Check config.ini and mount points.")

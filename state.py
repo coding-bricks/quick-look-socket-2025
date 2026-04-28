@@ -100,7 +100,7 @@ SPEC_DOC_STATE: Optional[Dict[str, Any]] = None
 
 
 # Inizializzazione automatica all'import del modulo
-initialize_map_cache()
+# initialize_map_cache()
 
 
 # ----------------------------------------------------------------------

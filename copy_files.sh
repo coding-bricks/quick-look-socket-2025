@@ -65,18 +65,51 @@ files_sar_nod=(
 
 
 
-
-
-
 # Destination directory
 destination="/home02/fabio.schirru/github/quick-look_2025_socket/fits_files/"
 
-# Copy each file every 10 seconds
 for file in "${files[@]}"; do
+  echo "----------------------------------------"
   echo "Copying $file to $destination"
+
+  # dimensione file in MB (per throughput)
+  size_bytes=$(stat -c%s "$file")
+  size_mb=$(echo "scale=2; $size_bytes/1024/1024" | bc)
+
+  # timing copia (solo cp)
+  start_time=$(date +%s.%N)
+
   cp "$file" "$destination"
-  echo "Waiting 8 seconds before next copy..."
+
+  end_time=$(date +%s.%N)
+
+  # calcolo tempo
+  elapsed=$(echo "$end_time - $start_time" | bc)
+
+  # throughput MB/s
+  speed=$(echo "scale=2; $size_mb / $elapsed" | bc)
+
+  echo "File size: ${size_mb} MB"
+  echo "Copy time: ${elapsed} s"
+  echo "Throughput: ${speed} MB/s"
+
+  echo "Waiting 10 seconds before next copy..."
   sleep 10
 done
 
 echo "All files copied."
+
+
+# --- OLD --- #
+# Destination directory
+#destination="/home02/fabio.schirru/github/quick-look_2025_socket/fits_files/"
+
+# Copy each file every 10 seconds
+#for file in "${files[@]}"; do
+#  echo "Copying $file to $destination"
+#  cp "$file" "$destination"
+#  echo "Waiting 8 seconds before next copy..."
+#  sleep 10
+#done
+
+#echo "All files copied."

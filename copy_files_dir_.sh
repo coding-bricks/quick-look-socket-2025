@@ -2,7 +2,8 @@
 
 #SOURCE_DIR="/roach2_nuraghe/data/26-23/20250611/20250611-091934-26-23-W3OH" # nodding with SARDARA
 #SOURCE_DIR="/home02/fabio.schirru/skarab/20241024/ps/20241024-150844-S0000-W3OH" # position switching SKARAB
-SOURCE_DIR="/roach2_nuraghe/data/2-25/20250314/20250314-153203-2-25-SUN_RA_K18" # sun map
+SOURCE_DIR="/roach2_nuraghe/data/2-25/20250314/20250314-130043-2-25-SUN_RA_K18" # sun map
+#SOURCE_DIR="/home02/fabio.schirru/data/20250722/20250722-103755-KBAND-3C84AZ" # test gain-curve with map shifts
 
 DEST_DIR="/home02/fabio.schirru/github/quick-look_2025_socket/fits_files"
 
