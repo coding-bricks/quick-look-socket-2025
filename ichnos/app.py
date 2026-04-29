@@ -1,29 +1,34 @@
 # app.py
 # Base data directory: /roach2_nuraghe/data/
 
-# Import the Bokeh Server module
-import bokeh_server
-
-# New import for embedding Bokeh apps in Flask
-from bokeh.embed import server_document
+from ichnos import state
+from ichnos import bokeh_server
+from ichnos.fits_watcher import (
+    start_fits_monitor,
+    stop_fits_monitor,
+    set_socketio_instance,
+    set_monitor_directories
+)
 
 import os
-import state
-import sys  # Import sys to access command-line arguments
+import sys  # It allows to access command-line arguments
 import threading
 import configparser
 from flask import Flask, render_template
 from flask_socketio import SocketIO, emit
+# New import for embedding Bokeh apps in Flask
+from bokeh.embed import server_document
 
-# Import functions from fits_watcher.py, updated for multi-directory support
-from fits_watcher import (
-    start_fits_monitor,
-    stop_fits_monitor,
-    set_socketio_instance,
-    set_monitor_directories  # Renamed to reflect multi-directory support
+
+# This is the main repo folder where 'static' and 'template' folders are located
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+app = Flask(
+    __name__,
+    template_folder=os.path.join(BASE_DIR, "templates"),
+    static_folder=os.path.join(BASE_DIR, "static")
 )
-
-app = Flask(__name__)
+#app = Flask(__name__)
 app.config['SOCKETIO_LOGGER'] = False
 app.config['DEBUG'] = False
 app.config['SECRET_KEY'] = 'your_secret_key_here'
@@ -32,7 +37,8 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 fits_observer = None
 
 # --- Configuration File Handling ---
-CONFIG_FILE_PATH = os.path.join(app.root_path, 'static', 'config.ini')
+#CONFIG_FILE_PATH = os.path.join(app.root_path, 'static', 'config.ini')
+CONFIG_FILE_PATH = os.path.join(BASE_DIR, 'static', 'config.ini')
 
 
 def _create_default_config():
@@ -42,7 +48,7 @@ def _create_default_config():
     config = configparser.ConfigParser()
     config['Drives'] = {
         # Relative path used for local debugging
-        'local_drive': os.path.abspath(os.path.join(app.root_path, 'fits_files')),
+        'local_drive': os.path.abspath(os.path.join(BASE_DIR, 'fits_files')),
         # Example absolute paths for remote environments
         'remote_drive_1': '/roach2_nuraghe/data',
         'remote_drive_2': '/another_drive/data'

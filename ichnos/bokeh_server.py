@@ -1,6 +1,5 @@
 # bokeh_server.py
 
-import threading
 import time
 from bokeh.plotting import curdoc
 from bokeh.application import Application
@@ -15,9 +14,9 @@ from bokeh.models import Panel
 
 
 # Importa i tuoi moduli: stato globale, visualizzazioni e Worker B
-import state
+from ichnos import state
 # Importa la funzione di creazione del plot iniziale (es. da bokeh_visuals.py)
-from bokeh_visuals import create_map_layout, create_scatter_layout, create_spectrum_layout
+from ichnos.bokeh_visuals import create_map_layout, create_scatter_layout, create_spectrum_layout
 
 # Variabili Globali per la Gestione del Server
 server: Optional[Server] = None

@@ -1,21 +1,21 @@
 # fits_processor.py
 
-
 from typing import Dict, List, Tuple, Any
 
 from math import pi
 import os
 import re
-import state
+
+
 import threading
 import time
 import numpy as np # For generating dummy plot data
-import nodding_manager # <--- ASSICURATI CHE IL MODULO SIA ACCESSIBILE
 
-
-import threading
-import map_gridding # Worker B
-
+from ichnos import state
+from ichnos import nodding_manager
+from ichnos import map_gridding
+from ichnos.bokeh_server import update_bokeh_plot, update_scatter_plot, reset_scatter_plot
+from ichnos.bokeh_visuals import _plot_and_save_html
 
 from astropy.io import fits
 from flask_socketio import SocketIO
@@ -23,11 +23,12 @@ from bokeh.plotting import figure, column, show # Import Bokeh plotting tools
 from bokeh.resources import CDN # For CDN resources (JS/CSS)
 from bokeh.palettes import Category10
 from bokeh.models import LinearAxis, Range1d
-from bokeh_server import update_bokeh_plot, update_scatter_plot, reset_scatter_plot
+
 from bokeh.embed import file_html # For saving plot to HTML
 
 
-from bokeh_visuals import _plot_and_save_skarab_nodding_html, _plot_and_save_html
+
+#from bokeh_visuals import _plot_and_save_skarab_nodding_html, _plot_and_save_html
 
 # Variabile per tenere traccia del thread di grigliatura attivo
 gridding_thread = None
@@ -996,9 +997,9 @@ def update_global_point_cloud_dual_pol(
 # FITS_processor.py
 
 # ... (altre importazioni)
-import map_gridding
-import state
-import bokeh_server
+#import map_gridding
+#import state
+from ichnos import bokeh_server
 # ...
 
 def run_gridding_task():

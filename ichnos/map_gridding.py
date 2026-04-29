@@ -1,7 +1,7 @@
 # map_gridding.py (VERSIONE CORRETTA PER L'INTEGRAZIONE BOKEH - Generalizzata X/Y)
 
 import numpy as np
-import state 
+from ichnos import state 
 import math
 from typing import Dict, Any, Optional
 

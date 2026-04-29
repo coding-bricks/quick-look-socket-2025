@@ -1,7 +1,8 @@
 import os
 import numpy as np
-import state
 import time
+
+from ichnos import state
 
 # Moduli per la creazione di figure e layout di base
 from bokeh.plotting import figure

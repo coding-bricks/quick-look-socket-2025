@@ -3,13 +3,13 @@
 import os
 import re
 import threading
-import time
 # PollingObserver is used for more reliable monitoring on network/remote drives (NFS/Lustre)
 from watchdog.observers.polling import PollingObserver
 from watchdog.events import FileSystemEventHandler
 
 # Import processing logic from the fits_processor module
-from fits_processor import process_fits_file, set_socketio_instance_for_processor
+from ichnos.fits_processor import process_fits_file, set_socketio_instance_for_processor
+
 
 # Global list to hold multiple monitoring paths
 MONITOR_DIRECTORIES = [] 
