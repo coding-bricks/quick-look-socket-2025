@@ -261,13 +261,19 @@ def start_app():
    
 
     # 8. Start the Flask-SocketIO server
+    # Server in 'Development' mode
+    '''
     socketio.run(
         app,
-        debug=False,
-        allow_unsafe_werkzeug=True,
-        host='0.0.0.0',
-        port=5000
-    )
+        host="127.0.0.1",
+        port=5000,
+        debug=True,
+        #allow_unsafe_werkzeug=True,
+        use_reloader=True
+    )'''
+
+    # Server in 'Production' mode
+    socketio.run( app, host='0.0.0.0', port=5000 )
 
 
 
