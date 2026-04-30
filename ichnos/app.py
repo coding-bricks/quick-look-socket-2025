@@ -11,6 +11,7 @@ from ichnos.fits_watcher import (
 )
 
 import os
+import secrets
 import sys  # It allows to access command-line arguments
 import threading
 import configparser
@@ -31,8 +32,10 @@ app = Flask(
 #app = Flask(__name__)
 app.config['SOCKETIO_LOGGER'] = False
 app.config['DEBUG'] = False
-app.config['SECRET_KEY'] = 'your_secret_key_here'
-socketio = SocketIO(app, cors_allowed_origins="*")
+#app.config['SECRET_KEY'] = 'your_secret_key_here'
+app.config['SECRET_KEY'] = secrets.token_hex(32)
+#socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 fits_observer = None
 
@@ -269,11 +272,20 @@ def start_app():
         port=5000,
         debug=True,
         #allow_unsafe_werkzeug=True,
-        use_reloader=True
+        use_reloader=False
     )'''
 
     # Server in 'Production' mode
-    socketio.run( app, host='0.0.0.0', port=5000 )
+    
+    socketio.run( 
+        app, 
+        host='0.0.0.0', 
+        port=5000,
+        debug=False,
+        use_reloader=False
+    )
+
+   
 
 
 
