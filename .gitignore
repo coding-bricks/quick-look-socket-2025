@@ -7,3 +7,12 @@ __pycache__/
 
 *.fits*
 *.html
+
+# Other files
+requirements.lock.txt
+
+# Other folders
+*.egg-info/
+
+# Virtual Environments
+.venv/
