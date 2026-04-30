@@ -22,6 +22,7 @@ dependencies = [
     "Flask>=2.2,<3.0",
     "Flask-SocketIO>=5.3,<6",
     "watchdog==2.1.0",
+    "eventlet==0.41.0",
 
     # --- UTILITIES ---
     "PyYAML>=6",
