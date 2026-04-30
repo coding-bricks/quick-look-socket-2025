@@ -14,6 +14,8 @@ __pycache__/
 
 # Other files
 *.sh
+config.py
+requirements.txt
 requirements.lock.txt
 
 # Other folders
