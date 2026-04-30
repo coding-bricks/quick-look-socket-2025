@@ -1,8 +1,12 @@
 __pycache__/
+
+Temporary files
+
 *.pyc
 *~
+*.py~
 
-# File temporanei di Emacs
+# Emacs temporary files
 \#*\#
 
 *.fits*
