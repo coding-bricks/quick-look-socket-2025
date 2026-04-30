@@ -1,7 +1,6 @@
 __pycache__/
 
-Temporary files
-
+# Temporary files
 *.pyc
 *~
 *.py~
@@ -9,13 +8,16 @@ Temporary files
 # Emacs temporary files
 \#*\#
 
+# Data files
 *.fits*
 *.html
 
 # Other files
+*.sh
 requirements.lock.txt
 
 # Other folders
+scripts/
 *.egg-info/
 
 # Virtual Environments
