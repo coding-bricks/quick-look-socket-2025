@@ -95,7 +95,7 @@ Installing newer versions may break the application.
 
 ---
 
-## ?? Development Notes
+## Development Notes
 
 The project is installed in **editable mode** (`pip install -e .`), which means:
 
