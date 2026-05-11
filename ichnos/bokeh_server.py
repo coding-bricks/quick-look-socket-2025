@@ -295,7 +295,7 @@ def start_bokeh_server(port: int = 5006, apps: Dict[str, Any] = None):
     """
     global server, server_thread
 
-    allowed_origins = [f"localhost:{port}", "localhost:5000", "127.0.0.1:5000"]
+    allowed_origins = ["*"]
 
     # Se non passiamo apps, carichiamo quella di default (retrocompatibilit�)
     if apps is None:
@@ -304,7 +304,7 @@ def start_bokeh_server(port: int = 5006, apps: Dict[str, Any] = None):
         # Trasformiamo le funzioni passate in Application Bokeh
         apps = {route: Application(FunctionHandler(func)) for route, func in apps.items()}
 
-    server = Server(apps, port=port, allow_websocket_origin=allowed_origins)
+    server = Server(apps, address="0.0.0.0", port=port, allow_websocket_origin=allowed_origins)
 
     def run_server():
         server.start()
