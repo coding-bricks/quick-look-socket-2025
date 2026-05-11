@@ -21,6 +21,7 @@ from flask_socketio import SocketIO, emit
 from bokeh.embed import server_document
 
 
+
 # This is the main repo folder where 'static' and 'template' folders are located
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
