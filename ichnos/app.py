@@ -15,7 +15,7 @@ import secrets
 import sys  # It allows to access command-line arguments
 import threading
 import configparser
-from flask import Flask, render_template
+from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit
 # New import for embedding Bokeh apps in Flask
 from bokeh.embed import server_document
@@ -23,7 +23,7 @@ from bokeh.embed import server_document
 
 
 # This is the main repo folder where 'static' and 'template' folders are located
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__)))
 
 app = Flask(
     __name__,
@@ -103,7 +103,8 @@ def _check_mounted_drives(drive_paths):
 # --- Flask Routes ---
 @app.route('/')
 def index():
-    bokeh_url = "http://localhost:5006"
+    host_ip = request.host.split(":")[0]
+    bokeh_url = f"http://{host_ip}:5006"
     
     # Generiamo il gancio per la mappa
     map_script = server_document(url=bokeh_url + "/map_viewer")
