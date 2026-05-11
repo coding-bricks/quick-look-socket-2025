@@ -10,7 +10,6 @@ __pycache__/
 
 # Data files
 *.fits*
-*.html
 
 # Other files
 *.sh
