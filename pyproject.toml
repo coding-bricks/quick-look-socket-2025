@@ -33,3 +33,7 @@ ichnos = "ichnos.app:main"
 
 [tool.setuptools.package-data]
 ichnos = ["static/**", "templates/**"]
+
+[tool.setuptools.packages]
+# Indica esplicitamente il package
+find = { include = ["ichnos"] }

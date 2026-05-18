@@ -55,7 +55,7 @@ def set_socketio_instance_for_processor(sio):
     _socketio_instance = sio
     print("SocketIO instance passed to fits_processor.py")
 
-def _wait_for_file_completion(filepath, timeout=300, check_interval=0.5, stable_checks=3):
+def _wait_for_file_completion(filepath, timeout=300, check_interval=1.0, stable_checks=5):
     """
     Robustly waits for a file to stop growing in size, indicating it has
     been completely written to disk. This is crucial for handling files
