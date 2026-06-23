@@ -1621,9 +1621,14 @@ def reset_dashboard():
 
 
 def set_tab_labels(spectrum_type):
+    print("Spectrum Type from 'set_tab_labels'", spectrum_type)
 
-    # This method set the correct description of each tab label in the spectrum according to the spectrum_type(simple, spectra and stokes)
-    if spectrum_type == 'spectra' or 'simple':
+    # Verifichiamo se spectrum_type fa parte dei tipi supportati
+    if spectrum_type in ['spectra', 'simple']:
         state.CURRENT_SPEC['tab_labels'] = ["LEFT (LCP)", "RIGHT (RCP)"]
     elif spectrum_type == 'stokes':
         state.CURRENT_SPEC['tab_labels'] = ["Stokes I", "Stokes Q", "Stokes U", "Stokes V"]
+
+    print("state.CURRENT_SPEC['tab_labels'] VAL:", state.CURRENT_SPEC['tab_labels'])
+
+
