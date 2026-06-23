@@ -148,7 +148,13 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                             index = (feeds[i]*2)+1
                             data.append(np.array(hdul["DATA TABLE"].data[f"Ch{index}"]))
                         else:
-                            data.append(np.array(hdul["DATA TABLE"].data[f"Ch{feeds[i]}"]))
+                            # Dynamically compute the number of channels for each Stoke parameter
+                            chunk_size = chs // 4 
+                            # Extract data based on the number of channels per Stoke parameter       
+                            data.append(np.array(hdul["DATA TABLE"].data[f"Ch{feeds[i]}"][:, 0 : chunk_size]))
+                            data.append(np.array(hdul["DATA TABLE"].data[f"Ch{feeds[i]}"][:, chunk_size : 2 * chunk_size]))
+                            data.append(np.array(hdul["DATA TABLE"].data[f"Ch{feeds[i]}"][:, 2 * chunk_size : 3 * chunk_size]))
+                            data.append(np.array(hdul["DATA TABLE"].data[f"Ch{feeds[i]}"][:, 3 * chunk_size : 4 * chunk_size]))
                 else: # SKARAB
                     
                     # SKARAB files have fixed colum names Ch0 and Ch1
@@ -156,12 +162,19 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                         data.append(np.array(hdul["DATA TABLE"].data[f"Ch0"]))
                         data.append(np.array(hdul["DATA TABLE"].data[f"Ch1"]))
                     else: # case STOKES
-                        data.append(np.array(hdul["DATA TABLE"].data[f"Ch0"]))
-                        # The above line oc code should be like (to be understood if each sub-spectrum is 1024 in lenght...):
-                        # data.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][:, 0:1024]))
-                        # data.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][:, 1024:2048]))
-                        # data.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][:, 2048:3072]))
-                        # data.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][:, 3072:4096]))
+
+                        # Determine the correct data column name (Ch0 or based on feed number)
+                        ch_name = "Ch0" if "Ch0" in hdul["DATA TABLE"].columns.names else f"Ch{int(feed_number)}"
+                        # Dynamically compute the number of channels for each Stoke parameter
+                        chunk_size = chs // 4 
+                        # Extract data based on the number of channels per Stoke parameter                          
+                        data.append(np.array(hdul["DATA TABLE"].data[ch_name][:, 0 : chunk_size]))
+                        data.append(np.array(hdul["DATA TABLE"].data[ch_name][:, chunk_size : 2 * chunk_size]))
+                        data.append(np.array(hdul["DATA TABLE"].data[ch_name][:, 2 * chunk_size : 3 * chunk_size]))
+                        data.append(np.array(hdul["DATA TABLE"].data[ch_name][:, 3 * chunk_size : 4 * chunk_size]))
+
+                        # data.append(np.array(hdul["DATA TABLE"].data[f"Ch0"]))
+                       
 
             else: # case .fits# i.e. multi-feed (SARDARA only, SKARAB is always .fits with the feed number specified within the filename)
                 
@@ -179,11 +192,15 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                     # If we want to generate Maps with Stokes data we need to split the data into 4 chunks (polarizations LL, RR, RL, LR)
                     # Stokes data are stored in a single 1024 channels spectra -> [0:255][256:511][512:767][768:1023]
                     # Then we can add the RR and LL data
-                    data.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][:, 0:1024]))
-                    data.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][:, 1024:2048]))
-                    data.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][:, 2048:3072]))
-                    data.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][:, 3072:4096]))
-                    
+
+                    # Dynamically compute the number of channels for each Stoke parameter
+                    chunk_size = chs // 4 
+                    # Extract data based on the number of channels per Stoke parameter                          
+                    data.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][:, 0 : chunk_size]))
+                    data.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][:, chunk_size : 2 * chunk_size]))
+                    data.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][:, 2 * chunk_size : 3 * chunk_size]))
+                    data.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][:, 3 * chunk_size : 4 * chunk_size]))
+
                     
                     #data_map_stokes.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][:, 0:1024]))
                     #data_map_stokes.append(np.array(hdul["DATA TABLE"].data[f"Ch{int(feed_number)}"][:, 1024:2048]))

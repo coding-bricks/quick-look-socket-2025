@@ -88,6 +88,9 @@ def update_spectrum_plot():
             file_title = data.get('filename', 'File Sconosciuto')
             labels = data.get('legend_labels', [])
             colors = Category10[10]
+
+            print("len(data['averages'])", len(data['averages']))
+            print('*** num_feeds', num_feeds)
             
             new_tabs = []
 
