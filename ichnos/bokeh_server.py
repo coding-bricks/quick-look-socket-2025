@@ -40,31 +40,212 @@ def map_app(doc):
 
 
 def spec_app(doc):
+    
     """Applicazione dedicata al monitoraggio dello SPETTRO (Real-time)."""
     # 1. Inizializza il layout (Tabs, Figure, Sorgenti)
     layout, doc_state = create_spectrum_layout(doc)
     
     # 2. Salva i riferimenti nello stato specifico per lo spettro
+    # NOTA: Per gestire più tab, salviamo il doc_state dentro il 'doc' stesso della sessione!
+    doc.doc_state = doc_state
+    
+    # Manteniamo comunque il fallback globale se ti serve altrove, ma sappi che punterà all'ultima tab aperta
     state.SPEC_DOC_STATE = doc_state 
     
     # 3. Aggiunge il layout al documento
     doc.add_root(layout)
     
-    # 4. AVVIA IL MONITORAGGIO: controlla ogni 200ms se ci sono nuovi dati in state.py
-    doc.add_periodic_callback(check_for_spec_updates, 200)
+    # 4. Definiamo una funzione di controllo specifica per QUESTO documento/tab
+    def current_tab_check():
+        # Passiamo il 'doc' specifico a questa funzione
+        check_for_spec_updates_per_tab(doc)
+    
+    # Avvia il monitoraggio periodico solo per questa tab e conserva il riferimento
+    callback_obj = doc.add_periodic_callback(current_tab_check, 200)
+    
+    # TRUCCO CRUCIALE: Se l'utente chiude la tab o preme Refresh, distruggiamo il callback
+    def on_session_destroyed(session_context):
+        try:
+            doc.remove_periodic_callback(callback_obj)
+            print("BOKEH: Sessione chiusa/refresgata. Periodic callback rimosso con successo.")
+        except Exception:
+            pass
 
 
+
+
+def check_for_spec_updates_per_tab(doc):
+    """Controlla se ci sono aggiornamenti basandosi sul nome del file per ogni tab."""
+    if not hasattr(doc, 'doc_state') or not doc.doc_state:
+        return
+        
+    data = state.CURRENT_SPEC
+    
+    # Se il processor ha caricato dati e la tab non ha ancora visualizzato QUESTO specifico file
+    current_file = data.get('filename')
+    last_displayed_file = getattr(doc, 'last_displayed_file', None)
+    
+    # Se c'è un nuovo file pronto OPPURE il flag globale è True (per aggiornamenti in tempo reale dello stesso file)
+    if (current_file and current_file != last_displayed_file) or data.get('updated'):
+        # Salviamo sulla tab che questo file è stato preso in carico
+        doc.last_displayed_file = current_file
+        
+        # Eseguiamo l'update passando il documento della tab specifica
+        update_spectrum_plot_per_tab(doc)
+
+
+
+
+
+'''
 def check_for_spec_updates():
     """Funzione chiamata periodicamente da spec_app."""
     # Se il processor ha alzato il flag 'updated' nel dizionario CURRENT_SPEC
     if state.CURRENT_SPEC.get('updated'):
         update_spectrum_plot()
-
+'''
 
 
 # ----------------------------------------------------------------------
 # 2. LOGICA DI AGGIORNAMENTO SPETTRO (CHIAMATA DA PERIODIC CALLBACK)
 # ----------------------------------------------------------------------
+def update_spectrum_plot_per_tab(doc):
+    doc_state = doc.doc_state  # <-- Prende lo stato di QUESTA specifica tab!
+    data = state.CURRENT_SPEC
+    
+    if not doc_state:
+        return
+
+    def safe_update():
+        try:
+            t_start = time.time()
+
+
+            # --- 1. CONFIGURAZIONE E BOLEANI ---
+            is_stokes = (data.get('spectrum_type') == 'stokes')
+            is_simple = (data.get('spectrum_type') == 'simple')
+            active_pols = ['I', 'Q', 'U', 'V'] if is_stokes else ['LL', 'RR']
+            
+            num_pols = len(active_pols)
+            num_feeds = len(data['averages']) // num_pols if num_pols > 0 else 0
+            file_title = data.get('filename', 'File Sconosciuto')
+            labels = data.get('legend_labels', [])
+            colors = Category10[10]
+
+            print("len(data['averages'])", len(data['averages']))
+            print('*** num_feeds', num_feeds)
+            
+            new_tabs = []
+
+            # --- 2. MEMORIA STATO VISIBILIT� LEGENDA ---
+            # Serve per evitare che i feed "spenti" dall'utente si riaccendano al nuovo file
+            hidden_labels = {p: set() for p in active_pols}
+            for p in active_pols:
+                if p in doc_state['figs']:
+                    fig_old = doc_state['figs'][p]
+                    if fig_old.legend:
+                        for leg in fig_old.legend:
+                            for leg_item in leg.items:
+                                label = leg_item.label.get('value')
+                                if any(not r.visible for r in leg_item.renderers):
+                                    hidden_labels[p].add(label)
+
+            # --- 3. CICLO DI AGGIORNAMENTO PER OGNI POLARIZZAZIONE ---
+            for p in active_pols:
+                if p not in doc_state['figs']:
+                    continue
+                    
+                fig = doc_state['figs'][p]
+                source = doc_state['sources'][p]
+                
+                # A. Gestione Assi (Inferiore e Superiore)
+                #fig.xaxis.axis_label = "Sampling Point" if is_simple else "Channel"
+
+                # A. Gestione Assi (Inferiore e Superiore)
+                # MODIFICA: Usiamo fig.below[0] invece di fig.xaxis per non toccare l'asse superiore!
+                if fig.below:
+                    fig.below[0].axis_label = "Sampling Point" if is_simple else "Channel"
+                               
+                f_min = data.get('f_min', 0.0)
+                f_max = data.get('f_max', 1.0)
+                
+                # Cerchiamo l'asse superiore per aggiornare etichetta e visibilit�
+                if 'freq_range' in fig.extra_x_ranges:
+                    # Aggiorna i limiti numerici
+                    fig.extra_x_ranges['freq_range'].start = f_min
+                    fig.extra_x_ranges['freq_range'].end = f_max
+                    
+                    for axis in fig.above:
+                        if hasattr(axis, 'x_range_name') and axis.x_range_name == "freq_range":
+                            axis.visible = not is_simple
+                            # FORZA l'etichetta corretta qui
+                            axis.axis_label = "Frequency (MHz)" if not is_simple else ""
+
+                # B. Titolo dinamico
+                freq_info = f" | {f_min:.1f}-{f_max:.1f} MHz" if not is_simple else ""
+                fig.title.text = f"FILE: {file_title} | Pol: {p}{freq_info} ({num_feeds} Feeds)"
+                
+                # C. Pulizia Renderer e Legenda
+                fig.renderers = [r for r in fig.renderers if r.name != "data_line"]
+                if fig.legend:
+                    for leg in fig.legend:
+                        leg.items = []
+                
+                # D. Creazione Nuove Linee (Feed)
+                for i in range(num_feeds):
+                    current_label = labels[i] if i < len(labels) else f"Feed {i}"
+                    is_visible = current_label not in hidden_labels[p]
+
+                    fig.line(
+                        x='x', y=f'f{i}', source=source, 
+                        color=colors[i % 10], 
+                        legend_label=current_label,
+                        line_width=2,
+                        name="data_line",
+                        visible=is_visible 
+                    )
+
+                # E. Update Dati (Mapping dei dati nelle colonne della sorgente)
+                new_dict = {'x': data['x']}
+                for i in range(num_feeds):
+                    # Calcolo indice: alterna le pol per ogni feed (es: Feed0_L, Feed0_R, Feed1_L...)
+                    idx = i * num_pols + active_pols.index(p)
+                    if idx < len(data['averages']):
+                        new_dict[f'f{i}'] = data['averages'][idx]
+                source.data = new_dict
+
+                # F. Configurazione Interattivit� Legenda
+                if fig.legend:
+                    for leg in fig.legend:
+                        leg.click_policy = "hide"
+                
+                new_tabs.append(Panel(child=fig, title=f"Pol {p}"))
+
+            # --- 4. AGGIORNAMENTO INTERFACCIA ---
+            # --- AGGIORNAMENTO INTERFACCIA DI QUESTA TAB ---
+            doc_state['tabs_container'].tabs = new_tabs
+            
+            # Resettiamo il flag globale solo se questa è l'ultima tab a consumarlo
+            # o lasciamo che scada naturalmente. Per sicurezza lo azzeriamo:
+            state.CURRENT_SPEC['updated'] = False
+
+            t_end = time.time()
+            print(f"Bokeh tab update elapsed: {t_end - t_start:.3f} s")            
+
+        except Exception as e:
+            print(f"BOKEH UPDATE ERROR: {e}")
+            import traceback
+            traceback.print_exc()
+            state.CURRENT_SPEC['updated'] = False
+
+    # Invia l'aggiornamento in modo sicuro alla coda di questa specifica sessione
+    doc.add_next_tick_callback(safe_update)
+
+
+# Old version: in this case if multiple users use the quick-look by opening more tabs,
+# the graphs will be refreshed many times in each tab. The same problem may arise pressing the button 'refresh' on the browser
+
+'''
 def update_spectrum_plot():
     doc_state = state.SPEC_DOC_STATE
     data = state.CURRENT_SPEC
@@ -189,7 +370,7 @@ def update_spectrum_plot():
 
     # Invia l'aggiornamento al thread principale di Bokeh
     doc_state['doc'].add_next_tick_callback(safe_update)
-
+'''
 
 # ----------------------------------------------------------------------
 # 2. GESTIONE AGGIORNAMENTO (Chiamato dal Worker B)
