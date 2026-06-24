@@ -1,5 +1,6 @@
 # state.py
 import numpy as np
+import time
 from typing import Dict, Any, Optional
 
 # ----------------------------------------------------------------------
@@ -24,7 +25,7 @@ SPECTRUM_TYPE = "spectra" # by default
 
 # Variables used to reset the x-axis ranges
 CURRENT_SCHEDULE = None   # Memorizza l'ultima sorgente elaborata
-IS_NEW_DATASET = False  # Il flag che Bokeh "ascolter�"
+IS_NEW_DATASET = False  # Il flag che Bokeh "ascolterà"
 
 # --------------------------------------------------------
 # 1.1 SUBSCAN STATE
@@ -61,13 +62,30 @@ def initialize_map_cache():
         },
     }
     GLOBAL_HPBW_ARCSEC = 0.0
-    print("? Cache mappe e HPBW inizializzati correttamente.")
+    print("✔ Cache mappe e HPBW inizializzati correttamente.")
+
+
+# ----------------------------------------------------------------------
+# 2.1 NUOVI BUFFER ASINCRONI PER AGGIORNAMENTO MAPPE (MULTI-UTENTE)
+# ----------------------------------------------------------------------
+# "Cassetta delle lettere" dove il Worker B deposita le mappe grigliate appena calcolate
+LATEST_MAP_RESULTS: Dict[str, Dict[str, Any]] = {}
+
+# Campanello per le tab: aggiornato con time.time() dal Worker B per segnalare nuovi dati
+LAST_MAP_TIMESTAMP: float = 0.0
+
+# Buffer che accumula lo storico dei punti dello scatter plot per Pol0 e Pol1,
+# evitando che le tab perdano o duplichino punti durante lo streaming asincrono
+CURRENT_SCATTER_DATA: Dict[str, Dict[str, list]] = {
+    'Pol0': {'x': [], 'y': [], 'z': []},
+    'Pol1': {'x': [], 'y': [], 'z': []}
+}
 
 
 # ----------------------------------------------------------------------
 # 3. SPECTRUM DATA (Real-Time Monitor)
 # ----------------------------------------------------------------------
-# Questo dizionario � il "ponte" tra il Processor e l'app Bokeh dello spettro.
+# Questo dizionario è il "ponte" tra il Processor e l'app Bokeh dello spettro.
 CURRENT_SPEC = {
     'x': np.array([]),       # Asse X: canali (es. 0..65535) o frequenze relative
     'averages': [],          # Lista di ndarray con i valori di potenza (uno per linea/feed)
@@ -79,7 +97,7 @@ CURRENT_SPEC = {
     'updated': False         # SEMAFORO: True quando il processor ha finito di scrivere i dati
 }
 
-# Variabili storiche (mantenute per compatibilit� con vecchi moduli se necessario)
+# Variabili storiche (usate anche dallo scatter plot ancillare)
 LAST_SPECTRUM_X = np.array([])
 LAST_SPECTRUM_POL0 = np.array([])
 LAST_SPECTRUM_POL1 = np.array([])
@@ -91,6 +109,8 @@ SPECTRUM_UPDATED = False
 # ----------------------------------------------------------------------
 # ATTENZIONE: Questi oggetti NON sono dati, ma i riferimenti ai componenti
 # live di Bokeh (Documenti, Sorgenti, Layout). Permettono l'aggiornamento push.
+# NOTA MULTI-UTENTE: Punteranno all'ultima sessione attiva, ma l'architettura
+# ora preferisce l'uso del doc.doc_state isolato per singola tab.
 
 # Stato per l'app /map_viewer
 BOKEH_DOC_STATE: Optional[Dict[str, Any]] = None
