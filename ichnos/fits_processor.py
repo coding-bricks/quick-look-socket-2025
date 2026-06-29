@@ -477,7 +477,7 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
 
 
 
-def _extract_skarab_nodding_data(filepath, spectrum_type, start_time_total):
+def _extract_skarab_nodding_data(filepath, spectrum_type, chs, start_time_total):
 
 
     if(state.IS_MAP):
@@ -516,12 +516,14 @@ def _extract_skarab_nodding_data(filepath, spectrum_type, start_time_total):
             elif spectrum_type == 'stokes':
                 # Caso STOKES: Tutti i dati sono in un unico canale (Ch0)
                 if 'Ch0' in data_table_columns:
-                    data.append(np.array(hdul["DATA TABLE"].data["Ch0"]))
-                    # The above line oc code should be like (to be understood if each sub-spectrum is 1024 in lenght...):
-                    # data.append(np.array(hdul["DATA TABLE"].data["Ch0"][:, 0:1024]))
-                    # data.append(np.array(hdul["DATA TABLE"].data["Ch0"][:, 1024:2048]))
-                    # data.append(np.array(hdul["DATA TABLE"].data["Ch0"][:, 2048:3072]))
-                    # data.append(np.array(hdul["DATA TABLE"].data["Ch0"][:, 3072:4096]))
+                    # Dynamically compute the number of channels for each Stoke parameter
+                    chunk_size = chs // 4 
+                    # Extract data based on the number of channels per Stoke parameter                          
+                    data.append(np.array(hdul["DATA TABLE"].data["Ch0"][:, 0 : chunk_size]))
+                    data.append(np.array(hdul["DATA TABLE"].data["Ch0"][:, chunk_size : 2 * chunk_size]))
+                    data.append(np.array(hdul["DATA TABLE"].data["Ch0"][:, 2 * chunk_size : 3 * chunk_size]))
+                    data.append(np.array(hdul["DATA TABLE"].data["Ch0"][:, 3 * chunk_size : 4 * chunk_size]))
+                    #data.append(np.array(hdul["DATA TABLE"].data["Ch0"]))
 
                 else:
                     print(f"SKARAB NODDING EXTRACT: Canale Ch0 non trovato per tipo '{spectrum_type}'.")
@@ -718,6 +720,7 @@ def process_skarab_nodding_pair(filepaths_tuple, common_prefix, feed_A_id, feed_
     file_A_path, file_B_path = filepaths_tuple
     start_time_total = time.time() 
     BACKEND = 'SKARAB'
+    chs = primary_header_data.get("bins")
     
     print(f"\n--- PROFILING INIZIATO: Nodding Pair {common_prefix} ---")
 
@@ -727,13 +730,13 @@ def process_skarab_nodding_pair(filepaths_tuple, common_prefix, feed_A_id, feed_
     
     # 1. ESTRAZIONE DATI FILE A
     # _extract_skarab_nodding_data esegue I/O e calcola np.nanmean
-    result_A = _extract_skarab_nodding_data(file_A_path, spectrum_type, start_time_total)
+    result_A = _extract_skarab_nodding_data(file_A_path, spectrum_type, chs, start_time_total)
     if result_A is None: 
         print(f"Errore estrazione dati A per {common_prefix}")
         return
 
     # 2. ESTRAZIONE DATI FILE B
-    result_B = _extract_skarab_nodding_data(file_B_path, spectrum_type, start_time_total)
+    result_B = _extract_skarab_nodding_data(file_B_path, spectrum_type, chs, start_time_total)
     if result_B is None: 
         print(f"Errore estrazione dati B per {common_prefix}")
         return
