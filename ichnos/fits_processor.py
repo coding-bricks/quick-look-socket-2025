@@ -525,6 +525,8 @@ def _extract_skarab_nodding_data(filepath, spectrum_type, chs, start_time_total)
                     data.append(np.array(hdul["DATA TABLE"].data["Ch0"][:, 3 * chunk_size : 4 * chunk_size]))
                     #data.append(np.array(hdul["DATA TABLE"].data["Ch0"]))
 
+                    print("chunk_size", chunk_size)
+
                 else:
                     print(f"SKARAB NODDING EXTRACT: Canale Ch0 non trovato per tipo '{spectrum_type}'.")
                     return None
