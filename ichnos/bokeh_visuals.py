@@ -319,31 +319,28 @@ def _plot_and_save_html(plot_save_dir, filepath, filename_prefix, filename_exten
 # Usiamo 'Tuple' da typing e rimuoviamo 'layout' che non esiste pi� come tipo.
 def create_map_layout(doc) -> Tuple[Any, Dict[str, Any]]: 
     """
-    Crea il layout iniziale della mappa 2D di Bokeh con due pannelli (Pol0, Pol1)
-    e inizializza i ColumnDataSource per gli aggiornamenti dinamici.
+    Crea il layout iniziale della mappa 2D di Bokeh con 4 pannelli statici
+    (Pol0, Pol1, RL, LR) e inizializza i ColumnDataSource per gli aggiornamenti dinamici.
 
     Parametri:
     - doc: Il documento Bokeh corrente (curdoc()).
 
     Ritorna:
-    - Tuple: (layout finale (tipo Any), dizionario contenente i riferimenti ai DataSource)
+    - Tuple: (layout finale (tipo Any), dizionario contenente i riferimenti ai DataSource e Tab)
     """
 
     # --- 1. Definizione di Stili e Mappe Colore ---
     
-    # Range iniziale dei colori (verr� aggiornato dinamicamente dal Worker B)
-    # Range arbitrario iniziale, ad esempio [0, 100]
+    # Range iniziale dei colori (verrà aggiornato dinamicamente dal Worker B)
     color_mapper = LinearColorMapper(palette=Magma256, low=0, high=100)
 
-    # --- 2. Inizializzazione dei ColumnDataSource ---
+    # --- 2. Inizializzazione dei ColumnDataSource per le 4 Polarizzazioni ---
     
     # Dati iniziali VUOTI: usiamo un array 1x1 con un valore NaN come placeholder
     empty_map_data = np.full((1, 1), np.nan, dtype=np.float32)
     
     initial_source_data = {
-        # La matrice 2D (deve essere in una lista per l'ImageRenderer)
         'image': [empty_map_data], 
-        # Coordinate e dimensioni (valori placeholder)
         'x': [0.0],
         'y': [0.0],
         'dw': [1.0],
@@ -352,86 +349,81 @@ def create_map_layout(doc) -> Tuple[Any, Dict[str, Any]]:
 
     source_pol0 = ColumnDataSource(data=initial_source_data)
     source_pol1 = ColumnDataSource(data=initial_source_data)
+    source_rl   = ColumnDataSource(data=initial_source_data)
+    source_lr   = ColumnDataSource(data=initial_source_data)
     
-    # --- 3. Creazione delle Figure (p0 e p1) ---
+    # --- 3. Creazione delle Figure ---
+    fig_kwargs = dict(
+        x_axis_label="X (RA/EL)",
+        y_axis_label="Y (DEC/AZ)",
+        active_scroll="wheel_zoom",
+        width=600, 
+        height=500
+    )
 
     # --- Figura Pol0 ---
-    p0 = figure(
-        title="Polarizzazione 0 (Pol0)",
-        x_axis_label="X (RA/EL)",
-        y_axis_label="Y (DEC/AZ)",
-        active_scroll="wheel_zoom",
-        width=600, height=500
-    )
-
-    p0.image(
-        image='image',
-        x='x', y='y', dw='dw', dh='dh',
-        source=source_pol0,
-        color_mapper=color_mapper,
-        # La colorbar � unica e collegata al color_mapper
-    )
-    
-    # Aggiunge la ColorBar
-    color_bar = ColorBar(color_mapper=color_mapper, label_standoff=12, 
-                         border_line_color=None, location=(0, 0))
-    p0.add_layout(color_bar, 'right')
-
+    p0 = figure(title="Polarizzazione 0 (Pol0)", **fig_kwargs)
+    p0.image(image='image', x='x', y='y', dw='dw', dh='dh', source=source_pol0, color_mapper=color_mapper)
+    color_bar0 = ColorBar(color_mapper=color_mapper, label_standoff=12, border_line_color=None, location=(0, 0))
+    p0.add_layout(color_bar0, 'right')
 
     # --- Figura Pol1 ---
-    # Usiamo lo stesso ColorMapper
-    p1 = figure(
-        title="Polarizzazione 1 (Pol1)",
-        x_axis_label="X (RA/EL)",
-        y_axis_label="Y (DEC/AZ)",
-        active_scroll="wheel_zoom",
-        width=600, height=500
-    )
+    p1 = figure(title="Polarizzazione 1 (Pol1)", **fig_kwargs)
+    p1.image(image='image', x='x', y='y', dw='dw', dh='dh', source=source_pol1, color_mapper=color_mapper)
+    color_bar1 = ColorBar(color_mapper=color_mapper, label_standoff=12, border_line_color=None, location=(0, 0))
+    p1.add_layout(color_bar1, 'right')
 
-    p1.image(
-        image='image',
-        x='x', y='y', dw='dw', dh='dh',
-        source=source_pol1,
-        color_mapper=color_mapper,
-    )
-    
-    # Aggiungiamo la ColorBar anche a P1 per consistenza (o la si omette per P1)
-    p1.add_layout(color_bar, 'right')
+    # --- Figura Cross-Pol RL ---
+    p_rl = figure(title="Stokes / Cross-Pol RL", **fig_kwargs)
+    p_rl.image(image='image', x='x', y='y', dw='dw', dh='dh', source=source_rl, color_mapper=color_mapper)
+    color_bar_rl = ColorBar(color_mapper=color_mapper, label_standoff=12, border_line_color=None, location=(0, 0))
+    p_rl.add_layout(color_bar_rl, 'right')
 
+    # --- Figura Cross-Pol LR ---
+    p_lr = figure(title="Stokes / Cross-Pol LR", **fig_kwargs)
+    p_lr.image(image='image', x='x', y='y', dw='dw', dh='dh', source=source_lr, color_mapper=color_mapper)
+    color_bar_lr = ColorBar(color_mapper=color_mapper, label_standoff=12, border_line_color=None, location=(0, 0))
+    p_lr.add_layout(color_bar_lr, 'right')
 
-    # --- 4. Creazione del Layout Finale con Tabs e Column ---
+    # --- 4. Creazione del Layout Finale con 4 Tabs Statistiche ---
     
     # Crea i pannelli (Tabs)
-    tab0 = Panel(child=p0, title="Pol0")
-    tab1 = Panel(child=p1, title="Pol1")
-    map_tabs = Tabs(tabs=[tab0, tab1])
+    # NOTA: Usiamo 'Panel' o 'TabPanel' a seconda della versione di Bokeh installata
+    tab0  = Panel(child=p0,   title="Pol0")
+    tab1  = Panel(child=p1,   title="Pol1")
+    tab_rl = Panel(child=p_rl, title="Cross RL")
+    tab_lr = Panel(child=p_lr, title="Cross LR")
     
-    # Usa 'column' per definire il layout principale che sar� la root del documento
+    map_tabs = Tabs(tabs=[tab0, tab1, tab_rl, tab_lr])
+    
     final_layout = column(map_tabs)
     
     # --- 5. Ritorno dello Stato per l'Aggiornamento ---
     
-    # Questo � il dizionario che verr� salvato in state.BOKEH_DOC_STATE
     doc_state = {
         'doc': doc,
         'source_pol0': source_pol0,
         'source_pol1': source_pol1,
-        'color_mapper': color_mapper 
+        'source_rl': source_rl,
+        'source_lr': source_lr,
+        'color_mapper': color_mapper,
+        'tabs_dict': {
+            'Pol0': tab0,
+            'Pol1': tab1,
+            'RL': tab_rl,
+            'LR': tab_lr
+        }
     }
     
     return final_layout, doc_state
 
 
 
-
-
-
-
 def create_scatter_layout(doc) -> Tuple[Any, Dict[str, Any]]: 
     """
-    Crea il layout iniziale con:
-    1. Tabs per la mappa Scatter (Pol0, Pol1)
-    2. Tabs per lo Spettro Medio (Pol0, Pol1) sotto la mappa.
+    Crea il layout iniziale con 4 Tab statiche per:
+    1. Mappe Scatter (Pol0, Pol1, RL, LR)
+    2. Spettro Medio Ancillare (Pol0, Pol1, RL, LR) posizionato sotto la mappa.
     """
     # Recuperiamo il sistema di coordinate attuale dallo stato
     coord_system = getattr(state, 'CURRENT_COORD_SYSTEM', 'AZEL')
@@ -447,71 +439,85 @@ def create_scatter_layout(doc) -> Tuple[Any, Dict[str, Any]]:
     # --- 1. Definizione Mapper Colore per lo Scatter ---
     color_mapper = LinearColorMapper(palette=Magma256, low=0, high=1)
 
-    # --- 2. Inizializzazione ColumnDataSource ---
+    # --- 2. Inizializzazione ColumnDataSource (4 Polarizzazioni) ---
     source_scatter_pol0 = ColumnDataSource(data=dict(x=[], y=[], z=[]))
     source_scatter_pol1 = ColumnDataSource(data=dict(x=[], y=[], z=[]))
+    source_scatter_rl   = ColumnDataSource(data=dict(x=[], y=[], z=[]))
+    source_scatter_lr   = ColumnDataSource(data=dict(x=[], y=[], z=[]))
     
-    # Sorgente per lo spettro (X=frequenza, Y=potenza)
-    source_spec = ColumnDataSource(data=dict(f=[], p0=[], p1=[]))
+    # Sorgente per lo spettro ancillare (X=frequenza/canale, Y=potenza per le 4 Pol)
+    source_spec = ColumnDataSource(data=dict(f=[], p0=[], p1=[], prl=[], plr=[]))
 
-    # --- 3. Creazione Figure MAPPA ---
+    # --- 3. Creazione Figure MAPPA SCATTER ---
     tooltips = [("X", "@x"), ("Y", "@y"), ("Z (Power)", "@z")]
+    map_kwargs = dict(
+        x_axis_label=x_label, y_axis_label=y_label,
+        width=780, height=560, active_scroll="wheel_zoom", tooltips=tooltips
+    )
 
-    p0_map = figure(title=f"Scatter Map - {plot_title_suffix} (Pol0)",
-                    x_axis_label=x_label, y_axis_label=y_label,
-                    width=780, height=560, active_scroll="wheel_zoom", tooltips=tooltips)
+    p0_map = figure(title=f"Scatter Map - {plot_title_suffix} (Pol0)", **map_kwargs)
     p0_map.circle(x='x', y='y', size=5, source=source_scatter_pol0,
                   color={'field': 'z', 'transform': color_mapper}, line_color=None)
 
-    p1_map = figure(title=f"Scatter Map - {plot_title_suffix} (Pol1)",
-                    x_axis_label=x_label, y_axis_label=y_label,
-                    width=780, height=560, active_scroll="wheel_zoom", tooltips=tooltips)
+    p1_map = figure(title=f"Scatter Map - {plot_title_suffix} (Pol1)", **map_kwargs)
     p1_map.circle(x='x', y='y', size=5, source=source_scatter_pol1,
                   color={'field': 'z', 'transform': color_mapper}, line_color=None)
+
+    prl_map = figure(title=f"Scatter Map - {plot_title_suffix} (Cross RL)", **map_kwargs)
+    prl_map.circle(x='x', y='y', size=5, source=source_scatter_rl,
+                   color={'field': 'z', 'transform': color_mapper}, line_color=None)
+
+    plr_map = figure(title=f"Scatter Map - {plot_title_suffix} (Cross LR)", **map_kwargs)
+    plr_map.circle(x='x', y='y', size=5, source=source_scatter_lr,
+                   color={'field': 'z', 'transform': color_mapper}, line_color=None)
 
     color_bar = ColorBar(color_mapper=color_mapper, location=(0,0), label_standoff=12)
     p0_map.add_layout(color_bar, 'right')
     p1_map.add_layout(color_bar, 'right')
+    prl_map.add_layout(color_bar, 'right')
+    plr_map.add_layout(color_bar, 'right')
 
-    
-    # Get the spectrum type and change the x-axis label and figure title accordingly
-    # This is valid only the first time the app is launched
+    # Label dinamiche in base al tipo di spettro
     x_spec_label = "Sampling Point [#]" if state.SPECTRUM_TYPE == "simple" else "Frequency [MHz]"
-    title_label_pol0 = "Spectrum - Pol0" if state.SPECTRUM_TYPE == "simple" else "Average Spectrum - Pol0"
-    title_label_pol1 = "Spectrum - Pol1" if state.SPECTRUM_TYPE == "simple" else "Average Spectrum - Pol1"
+    title_prefix = "Spectrum" if state.SPECTRUM_TYPE == "simple" else "Average Spectrum"
 
-    # --- 4. Creazione Figure SPETTRO (con TAB separate) ---
-    # Spettro Pol0
-    p0_spec = figure(title=title_label_pol0,
-                     x_axis_label=x_spec_label, y_axis_label="Power [Arb.]",
-                     width=780, height=250, 
-                     tools="reset,save,wheel_zoom,pan,box_zoom", # <-- Aggiunto box_zoom
-                     active_scroll="wheel_zoom",
-                     active_drag="box_zoom")                     # <-- Impostato come default
+    # --- 4. Creazione Figure SPETTRO ANCILLARE ---
+    spec_kwargs = dict(
+        x_axis_label=x_spec_label, y_axis_label="Power [Arb.]",
+        width=780, height=250, 
+        tools="reset,save,wheel_zoom,pan,box_zoom",
+        active_scroll="wheel_zoom",
+        active_drag="box_zoom"
+    )
+
+    p0_spec = figure(title=f"{title_prefix} - Pol0", **spec_kwargs)
     p0_spec.line(x='f', y='p0', source=source_spec, color="navy", line_width=2)
 
-    # Spettro Pol1
-    p1_spec = figure(title=title_label_pol1,
-                     x_axis_label=x_spec_label, y_axis_label="Power [Arb.]",
-                     width=780, height=250, 
-                     tools="reset,save,wheel_zoom,pan,box_zoom", # <-- Aggiunto box_zoom
-                     active_scroll="wheel_zoom",
-                     active_drag="box_zoom")                     # <-- Impostato come default
+    p1_spec = figure(title=f"{title_prefix} - Pol1", **spec_kwargs)
     p1_spec.line(x='f', y='p1', source=source_spec, color="red", line_width=2)
-   
-    # --- 5. Organizzazione in TABS ---
-    # Tabs per la Mappa
-    map_tab0 = Panel(child=p0_map, title="Map LL/Pol0")
-    map_tab1 = Panel(child=p1_map, title="Map RR/Pol1")
-    map_tabs = Tabs(tabs=[map_tab0, map_tab1])
 
-    # Tabs per lo Spettro
-    spec_tab0 = Panel(child=p0_spec, title="Spec LL/Pol0")
-    spec_tab1 = Panel(child=p1_spec, title="Spec RR/Pol1")
-    spec_tabs = Tabs(tabs=[spec_tab0, spec_tab1])
+    prl_spec = figure(title=f"{title_prefix} - Cross RL", **spec_kwargs)
+    prl_spec.line(x='f', y='prl', source=source_spec, color="green", line_width=2)
+
+    plr_spec = figure(title=f"{title_prefix} - Cross LR", **spec_kwargs)
+    plr_spec.line(x='f', y='plr', source=source_spec, color="purple", line_width=2)
+   
+    # --- 5. Organizzazione in 4 TABS ---
+    # Tabs per le Mappe Scatter
+    map_tab0  = Panel(child=p0_map,  title="Map Pol0")
+    map_tab1  = Panel(child=p1_map,  title="Map Pol1")
+    map_tab_rl = Panel(child=prl_map, title="Map Cross RL")
+    map_tab_lr = Panel(child=plr_map, title="Map Cross LR")
+    map_tabs = Tabs(tabs=[map_tab0, map_tab1, map_tab_rl, map_tab_lr])
+
+    # Tabs per gli Spettri Ancillari
+    spec_tab0  = Panel(child=p0_spec,  title="Spec Pol0")
+    spec_tab1  = Panel(child=p1_spec,  title="Spec Pol1")
+    spec_tab_rl = Panel(child=prl_spec, title="Spec Cross RL")
+    spec_tab_lr = Panel(child=plr_spec, title="Spec Cross LR")
+    spec_tabs = Tabs(tabs=[spec_tab0, spec_tab1, spec_tab_rl, spec_tab_lr])
 
     # --- 6. Layout Finale ---
-    # Colonna: Sopra le tab della mappa, sotto le tab dello spettro
     final_layout = column(map_tabs, spec_tabs, spacing=30)
 
     # --- 7. Stato per aggiornamenti ---
@@ -519,14 +525,27 @@ def create_scatter_layout(doc) -> Tuple[Any, Dict[str, Any]]:
         'doc': doc,
         'source_scatter_pol0': source_scatter_pol0,
         'source_scatter_pol1': source_scatter_pol1,
+        'source_scatter_rl':   source_scatter_rl,
+        'source_scatter_lr':   source_scatter_lr,
         'source_spec': source_spec, 
         'color_mapper_scatter': color_mapper,
-        # AGGIUNGI QUESTI:
         'p0_spec': p0_spec,
-        'p1_spec': p1_spec
+        'p1_spec': p1_spec,
+        'prl_spec': prl_spec,
+        'plr_spec': plr_spec,
+        'map_tabs_dict': {
+            'Pol0': map_tab0, 'Pol1': map_tab1,
+            'RL': map_tab_rl, 'LR': map_tab_lr
+        },
+        'spec_tabs_dict': {
+            'Pol0': spec_tab0, 'Pol1': spec_tab1,
+            'RL': spec_tab_rl, 'LR': spec_tab_lr
+        }
     }
 
     return final_layout, doc_state
+
+
 
 
 def create_spectrum_layout(doc):
