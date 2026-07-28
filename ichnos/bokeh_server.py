@@ -1,6 +1,7 @@
 # bokeh_server.py
 
 import time
+import sys
 from bokeh.plotting import curdoc
 from bokeh.application import Application
 from bokeh.application.handlers.function import FunctionHandler
@@ -16,6 +17,7 @@ from ichnos import state
 # Importa la funzione di creazione del plot iniziale
 from ichnos.bokeh_visuals import create_map_layout, create_scatter_layout, create_spectrum_layout
 
+
 # Variabili Globali per la Gestione del Server
 server: Optional[Server] = None
 server_thread: Optional[Thread] = None
@@ -27,6 +29,7 @@ server_thread: Optional[Thread] = None
 
 def map_app(doc):
     """Applicazione dedicata alla visualizzazione della MAPPA / SCATTER (Real-time)."""
+    
     # 1. Inizializza il layout specifico in base alla modalità impostata
     if state.USE_SCATTER_MODE:
         layout_obj, doc_state = create_scatter_layout(doc)
@@ -36,7 +39,7 @@ def map_app(doc):
     # 2. ISOLAMENTO MULTI-UTENTE: Salviamo lo stato dentro il 'doc' della singola tab
     doc.doc_state = doc_state
     
-    # Manteniamo comunque il fallback globale per retrocompatibilità, pur sapendo che punterà all'ultima aperta
+    # Manteniamo comunque il fallback globale per retrocompatibilità
     state.BOKEH_DOC_STATE = doc_state
     
     # 3. Aggiunge il layout al documento
@@ -44,8 +47,7 @@ def map_app(doc):
     
     # 4. Inizializziamo i tracciatori per sapere cosa questa specifica tab ha già renderizzato
     doc.last_map_timestamp = 0.0
-    doc.last_scatter_len0 = 0
-    doc.last_scatter_len1 = 0
+    doc.last_scatter_lens = {'Pol0': 0, 'Pol1': 0, 'RL': 0, 'LR': 0}
     doc.last_spec_update_flag = False
 
     # 5. Definiamo la funzione di controllo periodica per QUESTA tab
@@ -58,7 +60,6 @@ def map_app(doc):
     def on_session_destroyed(session_context):
         try:
             doc.remove_periodic_callback(callback_obj)
-            print("BOKEH MAP: Sessione chiusa/refresgata. Periodic callback rimosso.")
         except Exception:
             pass
 
@@ -80,7 +81,6 @@ def spec_app(doc):
     def on_session_destroyed(session_context):
         try:
             doc.remove_periodic_callback(callback_obj)
-            print("BOKEH SPEC: Sessione chiusa/refresgata. Periodic callback rimosso.")
         except Exception:
             pass
 
@@ -112,12 +112,13 @@ def check_for_map_updates_per_tab(doc):
 
     # CASO SCATTER MODE (Nuvola di punti + spettro ancillare)
     if state.USE_SCATTER_MODE:
-        current_len0 = len(state.CURRENT_SCATTER_DATA.get('Pol0', {}).get('x', [])) if hasattr(state, 'CURRENT_SCATTER_DATA') else 0
-        current_len1 = len(state.CURRENT_SCATTER_DATA.get('Pol1', {}).get('x', [])) if hasattr(state, 'CURRENT_SCATTER_DATA') else 0
+        scatter_data = getattr(state, 'CURRENT_SCATTER_DATA', {})
+        current_lens = {p: len(scatter_data.get(p, {}).get('x', [])) for p in ['Pol0', 'Pol1', 'RL', 'LR']}
         
-        if current_len0 != doc.last_scatter_len0 or current_len1 != doc.last_scatter_len1 or state.SPECTRUM_UPDATED:
-            doc.last_scatter_len0 = current_len0
-            doc.last_scatter_len1 = current_len1
+        has_new_scatter = any(current_lens[p] != doc.last_scatter_lens.get(p, 0) for p in current_lens)
+        
+        if has_new_scatter or state.SPECTRUM_UPDATED:
+            doc.last_scatter_lens = current_lens
             update_scatter_plot_per_tab(doc)
             
     # CASO MAPPA GRIGLIATA STANDARD (Mappa a pixel + spettrogramma RFI inferiore)
@@ -128,50 +129,53 @@ def check_for_map_updates_per_tab(doc):
         if current_map_ts > doc.last_map_timestamp or state.SPECTRUM_UPDATED:
             doc.last_map_timestamp = current_map_ts
             
-            # 1. Aggiorna la mappa grigliata a pixel
-            update_bokeh_plot_per_tab(doc, state.LATEST_MAP_RESULTS if hasattr(state, 'LATEST_MAP_RESULTS') else {})
+            # 1. Aggiorna la mappa grigliata a pixel (4 Tab statiche)
+            latest_maps = getattr(state, 'LATEST_MAP_RESULTS', {})
+            update_bokeh_plot_per_tab(doc, latest_maps)
             
-            # 2. AGGANCIO FIX: Aggiorna lo spettrogramma/grafico RFI inferiore se presente nel layout della mappa
+            # 2. Aggiorna lo spettrogramma/grafico RFI inferiore se presente nel layout della mappa
             if 'source_spec' in doc.doc_state:
                 update_ancillary_spectrum_for_map(doc)
 
 
-
 def update_ancillary_spectrum_for_map(doc):
-    """Aggiorna lo spettro RFI inferiore agganciato al layout della mappa grigliata."""
+    """Aggiorna lo spettro RFI inferiore agganciato al layout della mappa grigliata per tutte e 4 le polarizzazioni."""
     doc_state = doc.doc_state
     
     def safe_ancillary_update():
         source_spec = doc_state.get('source_spec')
-        p0_fig = doc_state.get('p0_spec')
-        p1_fig = doc_state.get('p1_spec')
+        fig_map = {
+            'p0': doc_state.get('p0_spec'),
+            'p1': doc_state.get('p1_spec'),
+            'prl': doc_state.get('prl_spec'),
+            'plr': doc_state.get('plr_spec'),
+        }
         
         if source_spec is not None:
             spec_type = getattr(state, 'SPECTRUM_TYPE', 'spectra')
+            has_4_pols = (spec_type == 'stokes')
+            
             new_label = "Sampling Point [#]" if spec_type == "simple" else "Frequency [MHz]"
             new_title = "Total Power History" if spec_type == "simple" else "Average Spectrum"
 
-            if p0_fig and p0_fig.below:
-                p0_fig.below[0].axis_label = new_label
-                p0_fig.title.text = f"{new_title} - Pol0"
-            if p1_fig and p1_fig.below:
-                p1_fig.below[0].axis_label = new_label
-                p1_fig.title.text = f"{new_title} - Pol1"
-            
-            # Spedisce i dati d'intensit� correnti memorizzati nello stato
+            # Aggiorna titoli ed assi per i grafici disponibili
+            pol_labels = {'p0': 'Pol0', 'p1': 'Pol1', 'prl': 'Cross RL', 'plr': 'Cross LR'}
+            for fig_key, fig_obj in fig_map.items():
+                if fig_obj and fig_obj.below:
+                    fig_obj.below[0].axis_label = new_label
+                    fig_obj.title.text = f"{new_title} - {pol_labels[fig_key]}"
+
+            # Invia i dati d'intensità per le 4 polarizzazioni
             source_spec.data = {
-                'f':  state.LAST_SPECTRUM_X,
-                'p0': state.LAST_SPECTRUM_POL0,
-                'p1': state.LAST_SPECTRUM_POL1
+                'f':   getattr(state, 'LAST_SPECTRUM_X', np.array([])),
+                'p0':  getattr(state, 'LAST_SPECTRUM_POL0', np.array([])),
+                'p1':  getattr(state, 'LAST_SPECTRUM_POL1', np.array([])),
+                'prl': getattr(state, 'LAST_SPECTRUM_RL', np.array([])) if has_4_pols else np.array([]),
+                'plr': getattr(state, 'LAST_SPECTRUM_LR', np.array([])) if has_4_pols else np.array([]),
             }
             state.SPECTRUM_UPDATED = False
-            print("BOKEH: Spettrogramma RFI inferiore aggiornato per la tab corrente.")
 
     doc.add_next_tick_callback(safe_ancillary_update)
-
-
-
-
 
 
 # ----------------------------------------------------------------------
@@ -251,52 +255,98 @@ def update_spectrum_plot_per_tab(doc):
 
             doc_state['tabs_container'].tabs = new_tabs
             state.CURRENT_SPEC['updated'] = False
-            print(f"Bokeh tab update elapsed: {time.time() - t_start:.3f} s")            
-        except Exception as e:
-            print(f"BOKEH UPDATE ERROR: {e}")
+        except Exception:
             state.CURRENT_SPEC['updated'] = False
 
     doc.add_next_tick_callback(safe_update)
 
 
 def update_bokeh_plot_per_tab(doc, result_maps: Dict[str, Dict[str, Any]]):
-    """Aggiorna le mappe grigliate isolandosi sulla singola istanza della tab browser."""
+    """Aggiorna le mappe grigliate isolandosi sulla singola istanza della tab browser per le 4 polarizzazioni."""
     doc_state = doc.doc_state
-    if not doc_state: return
+    if not doc_state: 
+        return
 
     def safe_update():
-        source_pol0 = doc_state['source_pol0']
-        source_pol1 = doc_state['source_pol1']
-        color_mapper = doc_state['color_mapper']
-        
-        global_low_color, global_high_color = float('inf'), float('-inf')
-        for pol_key in ['Pol0', 'Pol1']:
-            if pol_key in result_maps:
-                grid_map = result_maps[pol_key]
-                if 'low_color' in grid_map and 'high_color' in grid_map:
-                    global_low_color = min(global_low_color, grid_map['low_color'])
-                    global_high_color = max(global_high_color, grid_map['high_color'])
-
-        if global_low_color < global_high_color:
-            color_mapper.low = global_low_color
-            color_mapper.high = global_high_color
-
-        if 'Pol0' in result_maps:
-            grid_map = result_maps['Pol0']
-            source_pol0.data = {
-                'image': [grid_map['image']], 
-                'x': [grid_map['x']], 'y': [grid_map['y']],
-                'dw': [grid_map['dw']], 'dh': [grid_map['dh']],
+        try:
+            sources = {
+                'Pol0': doc_state.get('source_pol0'),
+                'Pol1': doc_state.get('source_pol1'),
+                'RL':   doc_state.get('source_rl'),
+                'LR':   doc_state.get('source_lr'),
             }
+            
+            color_mapper_direct = doc_state.get('color_mapper_direct')
+            color_mapper_cross  = doc_state.get('color_mapper_cross')
+            
+            tabs_dict = doc_state.get('tabs_dict', {})
 
-        if 'Pol1' in result_maps:
-            grid_map = result_maps['Pol1']
-            source_pol1.data = {
-                'image': [grid_map['image']], 
-                'x': [grid_map['x']], 'y': [grid_map['y']],
-                'dw': [grid_map['dw']], 'dh': [grid_map['dh']],
-            }
-        print("BOKEH: Aggiornamento sicuro mappa completato per la sessione corrente.")
+            spectrum_type = getattr(state, 'SPECTRUM_TYPE', 'spectra')
+            has_4_pols = (spectrum_type == 'stokes') or ('RL' in result_maps and 'LR' in result_maps)
+
+            # 1. Abilita/Disabilita le Tab RL e LR
+            if 'RL' in tabs_dict: tabs_dict['RL'].disabled = not has_4_pols
+            if 'LR' in tabs_dict: tabs_dict['LR'].disabled = not has_4_pols
+
+            active_keys = ['Pol0', 'Pol1', 'RL', 'LR'] if has_4_pols else ['Pol0', 'Pol1']
+            
+            # 2. CALCOLO RANGE COLORI DIRECT (Pol0, Pol1)
+            direct_low, direct_high = float('inf'), float('-inf')
+            for pol_key in ['Pol0', 'Pol1']:
+                if pol_key in result_maps:
+                    grid_map = result_maps[pol_key]
+                    l_val = grid_map.get('low_color')
+                    h_val = grid_map.get('high_color')
+                    if l_val is not None and h_val is not None and not np.isnan(l_val) and not np.isnan(h_val):
+                        direct_low = min(direct_low, l_val)
+                        direct_high = max(direct_high, h_val)
+
+            if direct_low < direct_high and color_mapper_direct is not None:
+                color_mapper_direct.low = direct_low
+                color_mapper_direct.high = direct_high
+
+            # 3. CALCOLO RANGE COLORI CROSS (RL, LR)
+            if has_4_pols:
+                cross_low, cross_high = float('inf'), float('-inf')
+                for pol_key in ['RL', 'LR']:
+                    if pol_key in result_maps:
+                        grid_map = result_maps[pol_key]
+                        l_val = grid_map.get('low_color')
+                        h_val = grid_map.get('high_color')
+                        
+                        if l_val is not None and h_val is not None and not np.isnan(l_val) and not np.isnan(h_val):
+                            cross_low = min(cross_low, l_val)
+                            cross_high = max(cross_high, h_val)
+
+                if cross_low < cross_high and color_mapper_cross is not None:
+                    color_mapper_cross.low = cross_low
+                    color_mapper_cross.high = cross_high
+
+            # 4. AGGIORNAMENTO DATI DELLE MATRICI
+            for key, source in sources.items():
+                if source is None: continue
+                
+                if key in result_maps and key in active_keys:
+                    grid_map = result_maps[key]
+                    img_data = grid_map['image']
+                    
+                    if np.iscomplexobj(img_data):
+                        img_data = np.abs(img_data)
+                    
+                    # Convertiamo in float32 reale per Bokeh
+                    img_data = np.asarray(img_data, dtype=np.float32)
+
+                    source.data = {
+                        'image': [img_data], 
+                        'x': [grid_map['x']], 'y': [grid_map['y']],
+                        'dw': [grid_map['dw']], 'dh': [grid_map['dh']],
+                    }
+                else:
+                    empty_map = np.full((1, 1), np.nan, dtype=np.float32)
+                    source.data = {'image': [empty_map], 'x': [0.0], 'y': [0.0], 'dw': [1.0], 'dh': [1.0]}
+
+        except Exception:
+            pass
 
     doc.add_next_tick_callback(safe_update)
 
@@ -304,72 +354,107 @@ def update_bokeh_plot_per_tab(doc, result_maps: Dict[str, Dict[str, Any]]):
 def update_scatter_plot_per_tab(doc):
     """Esegue lo streaming dei punti e dello spettro ancillare isolandosi sulla singola istanza della tab."""
     doc_state = doc.doc_state
-    if not doc_state: return
+    if not doc_state: return 
     
-    # Recuperiamo i dati correnti accumulati nello stato
     new_points = state.CURRENT_SCATTER_DATA if hasattr(state, 'CURRENT_SCATTER_DATA') else {}
 
     def safe_scatter_update():
-        source0 = doc_state.get('source_scatter_pol0')
-        source1 = doc_state.get('source_scatter_pol1')
-        source_spec = doc_state.get('source_spec')
-        color_mapper = doc_state.get('color_mapper_scatter')
-        p0_fig = doc_state.get('p0_spec')
-        p1_fig = doc_state.get('p1_spec')
-        
-        if source0 is None or source1 is None: return
-
-        if state.IS_NEW_DATASET:
-            new_x = state.LAST_SPECTRUM_X
-            if new_x is not None and len(new_x) > 0:
-                x_min, x_max = min(new_x), max(new_x)
-                if p0_fig:
-                    p0_fig.x_range.start = x_min
-                    p0_fig.x_range.end = x_max
-                if p1_fig:
-                    p1_fig.x_range.start = x_min
-                    p1_fig.x_range.end = x_max
-            state.IS_NEW_DATASET = False
-
-        all_z_values = []
-        for pol in ['Pol0', 'Pol1']:
-            if pol in new_points: all_z_values.extend(new_points[pol].get('z', []))
-        
-        if all_z_values and color_mapper:
-            color_mapper.low = min(color_mapper.low, min(all_z_values))
-            color_mapper.high = max(color_mapper.high, max(all_z_values))
-
-        # Nota: per evitare duplicazioni nello streaming cumulativo tra tab,
-        # facciamo un assegnamento completo (.data =) basato su quanto memorizzato nello stato complessivo
-        if 'Pol0' in new_points:
-            source0.data = {'x': new_points['Pol0']['x'], 'y': new_points['Pol0']['y'], 'z': new_points['Pol0']['z']}
-        if 'Pol1' in new_points:
-            source1.data = {'x': new_points['Pol1']['x'], 'y': new_points['Pol1']['y'], 'z': new_points['Pol1']['z']}
-
-        if state.SPECTRUM_UPDATED and source_spec is not None:
-            spec_type = getattr(state, 'SPECTRUM_TYPE', 'spectra')
-            new_label = "Sampling Point [#]" if spec_type == "simple" else "Frequency [MHz]"
-            new_title = "Total Power History" if spec_type == "simple" else "Average Spectrum"
-
-            if p0_fig:
-                if p0_fig.below: p0_fig.below[0].axis_label = new_label
-                p0_fig.title.text = f"{new_title} - Pol0"
-            if p1_fig:
-                if p1_fig.below: p1_fig.below[0].axis_label = new_label
-                p1_fig.title.text = f"{new_title} - Pol1"
-            
-            source_spec.data = {
-                'f':  state.LAST_SPECTRUM_X,
-                'p0': state.LAST_SPECTRUM_POL0,
-                'p1': state.LAST_SPECTRUM_POL1
+        try:
+            sources_scatter = {
+                'Pol0': doc_state.get('source_scatter_pol0'),
+                'Pol1': doc_state.get('source_scatter_pol1'),
+                'RL':   doc_state.get('source_scatter_rl'),
+                'LR':   doc_state.get('source_scatter_lr'),
             }
-            state.SPECTRUM_UPDATED = False 
+            source_spec = doc_state.get('source_spec')
+            
+            color_mapper_direct = doc_state.get('color_mapper_direct')
+            color_mapper_cross  = doc_state.get('color_mapper_cross')
+            
+            fig_map = {
+                'Pol0': doc_state.get('p0_spec'),
+                'Pol1': doc_state.get('p1_spec'),
+                'RL':   doc_state.get('prl_spec'),
+                'LR':   doc_state.get('plr_spec'),
+            }
+            
+            map_tabs = doc_state.get('map_tabs_dict', {})
+            spec_tabs = doc_state.get('spec_tabs_dict', {})
+
+            spectrum_type = getattr(state, 'SPECTRUM_TYPE', 'spectra')
+            has_4_pols = (spectrum_type == 'stokes')
+
+            # 1. Abilita / Disabilita Tab per RL e LR
+            for tabs_group in [map_tabs, spec_tabs]:
+                if 'RL' in tabs_group: tabs_group['RL'].disabled = not has_4_pols
+                if 'LR' in tabs_group: tabs_group['LR'].disabled = not has_4_pols
+
+            # 2. Reset dell'asse X se stiamo caricando un nuovo dataset
+            if state.IS_NEW_DATASET:
+                new_x = getattr(state, 'LAST_SPECTRUM_X', None)
+                if new_x is not None and len(new_x) > 0:
+                    x_min, x_max = min(new_x), max(new_x)
+                    for fig in fig_map.values():
+                        if fig:
+                            fig.x_range.start = x_min
+                            fig.x_range.end = x_max
+                state.IS_NEW_DATASET = False
+
+            # 3. Calcolo dinamico range colori Scatter SEPARATI
+            z_direct = []
+            for pol in ['Pol0', 'Pol1']:
+                if pol in new_points:
+                    z_direct.extend(new_points[pol].get('z', []))
+            if z_direct and color_mapper_direct:
+                color_mapper_direct.low = min(color_mapper_direct.low, min(z_direct))
+                color_mapper_direct.high = max(color_mapper_direct.high, max(z_direct))
+
+            if has_4_pols:
+                z_cross = []
+                for pol in ['RL', 'LR']:
+                    if pol in new_points:
+                        z_cross.extend(new_points[pol].get('z', []))
+                if z_cross and color_mapper_cross:
+                    color_mapper_cross.low = min(color_mapper_cross.low, min(z_cross))
+                    color_mapper_cross.high = max(color_mapper_cross.high, max(z_cross))
+
+            # 4. Aggiornamento ColumnDataSource per Scatter Plot
+            active_pols = ['Pol0', 'Pol1', 'RL', 'LR'] if has_4_pols else ['Pol0', 'Pol1']
+            for pol, source in sources_scatter.items():
+                if source is None: continue
+                
+                if pol in new_points and pol in active_pols:
+                    source.data = {'x': new_points[pol]['x'], 'y': new_points[pol]['y'], 'z': new_points[pol]['z']}
+                else:
+                    source.data = {'x': [], 'y': [], 'z': []}
+
+            # 5. Aggiornamento dello Spettro Ancillare
+            if state.SPECTRUM_UPDATED and source_spec is not None:
+                new_label = "Sampling Point [#]" if spectrum_type == "simple" else "Frequency [MHz]"
+                new_title = "Total Power History" if spectrum_type == "simple" else "Average Spectrum"
+
+                pol_labels = {'Pol0': 'Pol0', 'Pol1': 'Pol1', 'RL': 'Cross RL', 'LR': 'Cross LR'}
+                for pol, fig in fig_map.items():
+                    if fig:
+                        if fig.below: fig.below[0].axis_label = new_label
+                        fig.title.text = f"{new_title} - {pol_labels[pol]}"
+                
+                source_spec.data = {
+                    'f':   getattr(state, 'LAST_SPECTRUM_X', np.array([])),
+                    'p0':  getattr(state, 'LAST_SPECTRUM_POL0', np.array([])),
+                    'p1':  getattr(state, 'LAST_SPECTRUM_POL1', np.array([])),
+                    'prl': getattr(state, 'LAST_SPECTRUM_RL', np.array([])),
+                    'plr': getattr(state, 'LAST_SPECTRUM_LR', np.array([])),
+                }
+                state.SPECTRUM_UPDATED = False 
+
+        except Exception:
+            pass
 
     doc.add_next_tick_callback(safe_scatter_update)
 
 
 # --- INTERFACCE COMPATIBILI CON THREAD ESTERNI (WORKER B) ---
-# Queste funzioni vengono chiamate dal Worker B per depositare i dati nello stato e notificare il cambio di timestamp
 
 def update_bokeh_plot(result_maps: Dict[str, Dict[str, Any]]):
     """Aggiorna i buffer globali per fare in modo che le singole tab leggano i dati in differita."""
@@ -377,12 +462,16 @@ def update_bokeh_plot(result_maps: Dict[str, Dict[str, Any]]):
     state.LAST_MAP_TIMESTAMP = time.time()  # Fa scattare il controllo periodico di ogni tab indipendente
 
 def update_scatter_plot(new_points: Dict[str, Dict[str, List[float]]]):
-    """Aggiorna i buffer globali dello scatter per le tab attive."""
+    """Aggiorna i buffer globali dello scatter per le tab attive (supporta 4 polarizzazioni)."""
     if not hasattr(state, 'CURRENT_SCATTER_DATA'):
-        state.CURRENT_SCATTER_DATA = {'Pol0': {'x': [], 'y': [], 'z': []}, 'Pol1': {'x': [], 'y': [], 'z': []}}
+        state.CURRENT_SCATTER_DATA = {
+            'Pol0': {'x': [], 'y': [], 'z': []},
+            'Pol1': {'x': [], 'y': [], 'z': []},
+            'RL':   {'x': [], 'y': [], 'z': []},
+            'LR':   {'x': [], 'y': [], 'z': []},
+        }
     
-    # Estendiamo le liste globali con i nuovi punti in arrivo dal Worker
-    for pol in ['Pol0', 'Pol1']:
+    for pol in ['Pol0', 'Pol1', 'RL', 'LR']:
         if pol in new_points:
             state.CURRENT_SCATTER_DATA[pol]['x'].extend(new_points[pol].get('x', []))
             state.CURRENT_SCATTER_DATA[pol]['y'].extend(new_points[pol].get('y', []))
@@ -390,16 +479,20 @@ def update_scatter_plot(new_points: Dict[str, Dict[str, List[float]]]):
 
 
 def reset_scatter_plot():
-    """Pulisce i dati globali dello scatter."""
+    """Pulisce i dati globali dello scatter per tutte e 4 le polarizzazioni."""
     if hasattr(state, 'CURRENT_SCATTER_DATA'):
-        state.CURRENT_SCATTER_DATA = {'Pol0': {'x': [], 'y': [], 'z': []}, 'Pol1': {'x': [], 'y': [], 'z': []}}
-    # Notifichiamo il reset forzando l'aggiornamento a lunghezza zero delle tab
+        state.CURRENT_SCATTER_DATA = {
+            'Pol0': {'x': [], 'y': [], 'z': []},
+            'Pol1': {'x': [], 'y': [], 'z': []},
+            'RL':   {'x': [], 'y': [], 'z': []},
+            'LR':   {'x': [], 'y': [], 'z': []},
+        }
     doc_state = state.BOKEH_DOC_STATE
     if doc_state and 'doc' in doc_state and doc_state['doc']:
         def safe_reset():
-            if 'source_scatter_pol0' in doc_state:
-                doc_state['source_scatter_pol0'].data = {'x': [], 'y': [], 'z': []}
-                doc_state['source_scatter_pol1'].data = {'x': [], 'y': [], 'z': []}
+            for pol_key in ['source_scatter_pol0', 'source_scatter_pol1', 'source_scatter_rl', 'source_scatter_lr']:
+                if pol_key in doc_state:
+                    doc_state[pol_key].data = {'x': [], 'y': [], 'z': []}
         doc_state['doc'].add_next_tick_callback(safe_reset)
 
 
@@ -424,4 +517,3 @@ def start_bokeh_server(port: int = 5006, apps: Dict[str, Any] = None):
 
     server_thread = Thread(target=run_server, daemon=True)
     server_thread.start()
-    print(f"BOKEH: Server multi-app avviato su porta {port}")

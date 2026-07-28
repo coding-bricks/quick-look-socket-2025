@@ -166,6 +166,17 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                             data.append(np.array(hdul["DATA TABLE"].data[f"Ch{feeds[i]}"][:, chunk_size : 2 * chunk_size]))
                             data.append(np.array(hdul["DATA TABLE"].data[f"Ch{feeds[i]}"][:, 2 * chunk_size : 3 * chunk_size]))
                             data.append(np.array(hdul["DATA TABLE"].data[f"Ch{feeds[i]}"][:, 3 * chunk_size : 4 * chunk_size]))
+
+                        print(feeds[i])
+                        print(chunk_size)
+                        print(len(data))
+                        print(len(data[0]))
+                        print(len(data[1]))
+                        print(len(data[2]))
+                        print(len(data[3]))
+                        print(len(data[0][0]))
+                        print(len(data[1][0]))
+
                 else: # SKARAB
                     
                     # SKARAB files have fixed colum names Ch0 and Ch1
@@ -403,9 +414,14 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                     if(type(data[0][0]) == np.ndarray): # case SARDARA, SKARAB
        
                         for i in range(len(data)):
-                            # Esegui la media orizzontale (lungo i canali)
-                            pi_data = np.nanmean(data[i], axis=1) # <--- MEDIA ORIZZONTALE (Potenza P_i)
-                            
+                            # Esegui la media orizzontale (lungo i canali per la mappa)
+                            # Per le cross-polarizzazioni (i >= 2 -> RL, LR), usiamo il valore assoluto np.abs
+                            # per evitare che spike negative annullino la potenza o affondino la mappa.
+                            if i >= 2:
+                                pi_data = np.nanmean(np.abs(data[i]), axis=1)  # <--- MEDIA MODULO/ASSOLUTA per RL/LR
+                            else:
+                                pi_data = np.nanmean(data[i], axis=1)          # <--- MEDIA LINEARE per Pol0/Pol1
+                               
                             # In modalit� MAPPA, 'averages' conterr� le P_i di tutte le polarizzazioni/feeds
                             # di quel file, ma tipicamente per la mappa userai SOLO il primo set.
                             averages.append(pi_data) 
@@ -414,6 +430,11 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                         # For spectrum_type == 'stokes' we would need to add also data[2] and data[3]
                         state.LAST_SPECTRUM_POL0 = np.nanmean(data[0], axis=0)
                         state.LAST_SPECTRUM_POL1 = np.nanmean(data[1], axis=0)
+
+                        if(spectrum_type == 'stokes'):
+                        
+                            state.LAST_SPECTRUM_RL = np.nanmean(data[2], axis=0)
+                            state.LAST_SPECTRUM_LR = np.nanmean(data[3], axis=0)  
                         
                         # Una volta calcolati entrambi, segnaliamo a Bokeh che pu� aggiornare
                         state.SPECTRUM_UPDATED = True
@@ -447,7 +468,8 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                     # --- AGGIORNAMENTO DELLE DUE NUVOLA DI PUNTI ---
 
                     if len(all_pi_data) >= 2:
-                        print("Rilevati dati per due polarizzazioni. Inizio aggiornamento Dual-Pol.")
+                         
+                        print(f"Rilevati dati per {len(all_pi_data)} polarizzazioni. Inizio aggiornamento Dual-Pol.")
 
                         # CHIAMATA ESECUTIVA
                         update_global_point_cloud_dual_pol(
@@ -939,93 +961,74 @@ def is_map_by_keyword(raw_keyword_value: str) -> bool:
         return False
 
 
-
 def update_global_point_cloud_dual_pol(
     x_data_new: np.ndarray, 
     y_data_new: np.ndarray, 
     all_pi_data_new: List[np.ndarray]
 ) -> None:
 
-    if(state.USE_SCATTER_MODE != True):
-
-
-        """
-        Aggiorna due Nuvole di Punti (Pol0 e Pol1) all'interno dello stato globale (state.py) 
-        con i nuovi dati P_i e aggiorna i rispettivi limiti globali.
+    if state.USE_SCATTER_MODE != True:
+        # Supportiamo fino a 4 polarizzazioni
+        polarization_keys = ['Pol0', 'Pol1', 'RL', 'LR'] 
+        num_pols = min(len(all_pi_data_new), len(polarization_keys))
         
-        Non richiede pi� global_map_cache come parametro, accede direttamente a state.GLOBAL_MAP_CACHE.
-
-        Parametri:
-        - ra_data_new: Array NumPy delle coordinate RA della nuova strisciata (in gradi).
-        - dec_data_new: Array NumPy delle coordinate DEC della nuova strisciata (in gradi).
-        - all_pi_data_new: Lista NumPy 1D di Potenze P_i (index 0 = Pol0, index 1 = Pol1).
-        """
-        
-        # Chiavi di polarizzazione e limite massimo di polarizzazioni da gestire
-        polarization_keys = ['Pol0', 'Pol1'] 
-        num_pols = min(len(all_pi_data_new), 2)
-        
-        # 1. Calcola i limiti RA/DEC della nuova strisciata (sono uguali per entrambe le pol.)
         x_min_new = x_data_new.min()
         x_max_new = x_data_new.max()
         y_min_new = y_data_new.min()
         y_max_new = y_data_new.max()
 
-        # 2. Cicla sulle polarizzazioni disponibili e aggiorna la cache
         for i in range(num_pols):
             pol_key = polarization_keys[i]
             pi_data_current = all_pi_data_new[i]
             
-            # Accede direttamente allo stato globale importato
+            # Assicuriamoci che la chiave esista nella cache globale
+            if pol_key not in state.GLOBAL_MAP_CACHE:
+                state.GLOBAL_MAP_CACHE[pol_key] = {
+                    'X': np.array([]), 'Y': np.array([]), 'P': np.array([]),
+                    'X_min': float('inf'), 'X_max': float('-inf'),
+                    'Y_min': float('inf'), 'Y_max': float('-inf')
+                }
+            
             cache = state.GLOBAL_MAP_CACHE[pol_key] 
             
-            # CONTROLLO DI CONSISTENZA:
             if len(x_data_new) != len(pi_data_current):
-                print(f"ERRORE: Dati RA/DEC ({len(x_data_new)}) e P_i ({len(pi_data_current)}) per {pol_key} non corrispondono. Skippo.")
+                print(f"ERRORE: Dati X/Y ({len(x_data_new)}) e P_i ({len(pi_data_current)}) per {pol_key} non corrispondono. Skippo.")
                 continue
 
             # UPDATE GLOBAL LIMITS
-            cache['X_min'] = min(cache['X_min'], x_min_new) # Usare X_min
-            cache['X_max'] = max(cache['X_max'], x_max_new) # Usare X_max
-            cache['Y_min'] = min(cache['Y_min'], y_min_new) # Usare Y_min
-            cache['Y_max'] = max(cache['Y_max'], y_max_new) # Usare Y_max
+            cache['X_min'] = min(cache['X_min'], x_min_new)
+            cache['X_max'] = max(cache['X_max'], x_max_new)
+            cache['Y_min'] = min(cache['Y_min'], y_min_new)
+            cache['Y_max'] = max(cache['Y_max'], y_max_new)
 
             # APPEND DATA
-            # Le coordinate X e Y sono accoppiate con P
             cache['X'] = np.concatenate([cache['X'], x_data_new])
             cache['Y'] = np.concatenate([cache['Y'], y_data_new]) 
             cache['P'] = np.concatenate([cache['P'], pi_data_current])
 
-            print(f"? Aggiornata Nuvola {pol_key}. Totale Punti: {len(cache['X'])}. X Range: {cache['X_min']:.4f}/{cache['X_max']:.4f}")
-            print(f"? Aggiornata Nuvola {pol_key}. Totale Punti: {len(cache['Y'])}. Y Range: {cache['Y_min']:.4f}/{cache['Y_max']:.4f}")
+            print(f"✓ Aggiornata Nuvola {pol_key}. Totale Punti: {len(cache['X'])}")
             
     else:
-
         x_deg = x_data_new * (180.0 / np.pi)
         y_deg = y_data_new * (180.0 / np.pi)
 
         try:
-            # Prepariamo il pacchetto dati per Bokeh
-            # Usiamo i dati "freschi" appena estratti dal file FITS corrente
-            scatter_payload = {
-                'Pol0': {
-                    'x': x_deg.tolist(), 
-                    'y': y_deg.tolist(), 
-                    'z': all_pi_data_new[0].tolist()
-                },
-                'Pol1': {
-                    'x': x_deg.tolist(), 
-                    'y': y_deg.tolist(), 
-                    'z': all_pi_data_new[1].tolist()
+            polarization_keys = ['Pol0', 'Pol1', 'RL', 'LR']
+            scatter_payload = {}
+            
+            for i in range(min(len(all_pi_data_new), len(polarization_keys))):
+                pol_key = polarization_keys[i]
+                scatter_payload[pol_key] = {
+                    'x': x_deg.tolist(),
+                    'y': y_deg.tolist(),
+                    'z': all_pi_data_new[i].tolist()
                 }
-            }
 
-
-            # Invio asincrono a Bokeh
             update_scatter_plot(scatter_payload)
         except Exception as e:
             print(f"Errore durante lo streaming scatter: {e}")
 
+     
 
 # FITS_processor.py
 
@@ -1045,17 +1048,17 @@ def run_gridding_task():
     map_data = map_gridding.perform_gridding()
 
     if map_data is None:
+
         return
         
     # --- DIAGNOSTICA IN CONSOLE (Punto di interesse) ---
     print("\n----------------------------------------------------")
     print("DIAGNOSTICA MAPPA GRIGLIATA RICEVUTA:")
     
-    for pol_key in ['Pol0', 'Pol1']:
+    # Includiamo tutte e 4 le polarizzazioni!
+    for pol_key in ['Pol0', 'Pol1', 'RL', 'LR']:
         if pol_key in map_data:
             data = map_data[pol_key]
-            
-            # Verifichiamo che l'immagine sia un array NumPy e non vuota
             if isinstance(data['image'], np.ndarray) and data['image'].size > 0:
                 print(f"- Mappa {pol_key} -")
                 print(f"  Shape: {data['image'].shape}")
@@ -1065,6 +1068,7 @@ def run_gridding_task():
                 print(f"- Mappa {pol_key}: Dati non validi o vuoti.")
 
     print("----------------------------------------------------")
+    
     # --------------------------------------------------------
 
     # 2. Aggiorna il plot in Bokeh (Worker C)
