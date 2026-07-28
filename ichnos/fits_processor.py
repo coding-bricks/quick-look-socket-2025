@@ -120,6 +120,17 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
     start_time_total = time.time()
     print(f"\n--- PROFILING INIZIATO: {filename_prefix} ---")
 
+    # According to the spectrum type, update the number of channels per polarization
+    # chs is extracted from the SECTION TABLE
+    # In case of spectrum type = 'stokes' chs refers only to one polarization type
+    # In this case we need to multiply chs by the four polarizations
+
+    if(spectrum_type == 'stokes'):
+
+        chs = chs * 4
+
+    print(f"\n--- Channels: {chs} ---")
+
     data = []
     data_map_stokes = [] 
     averages = []
