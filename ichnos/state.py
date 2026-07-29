@@ -90,6 +90,7 @@ CURRENT_SCATTER_DATA: Dict[str, Dict[str, list]] = {
 CURRENT_SPEC = {
     'x': np.array([]),       # Asse X: canali (es. 0..65535) o frequenze relative
     'averages': [],          # Lista di ndarray con i valori di potenza
+    'rms_averages': [],      # Lista di ndarray con i valori di RMS
     'f_min': 0.0,            # Frequenza minima per l'asse superiore (MHz)
     'f_max': 0.0,            # Frequenza massima per l'asse superiore (MHz)
     'filename': "",          # Nome del file FITS in elaborazione

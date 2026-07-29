@@ -120,10 +120,9 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
     start_time_total = time.time()
     print(f"\n--- PROFILING INIZIATO: {filename_prefix} ---")
 
-    # According to the spectrum type, update the number of channels per polarization
-    # chs is extracted from the SECTION TABLE
+    # Regardless to the spectrum type, the number of channels per spectrum is extracted from the SECTION TABLE
     # In case of spectrum type = 'stokes' chs refers only to one polarization type
-    # In this case we need to multiply chs by the four polarizations
+    # Therefore in this case we need to multiply chs by a factor 4 (the four polarizations)
 
     if(spectrum_type == 'stokes'):
 
@@ -134,6 +133,7 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
     data = []
     data_map_stokes = [] 
     averages = []
+    rms_averages = []
     averages_stokes = []
 
     feed_number = 0 # default value for multi-feed
@@ -166,16 +166,6 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                             data.append(np.array(hdul["DATA TABLE"].data[f"Ch{feeds[i]}"][:, chunk_size : 2 * chunk_size]))
                             data.append(np.array(hdul["DATA TABLE"].data[f"Ch{feeds[i]}"][:, 2 * chunk_size : 3 * chunk_size]))
                             data.append(np.array(hdul["DATA TABLE"].data[f"Ch{feeds[i]}"][:, 3 * chunk_size : 4 * chunk_size]))
-
-                        print(feeds[i])
-                        print(chunk_size)
-                        print(len(data))
-                        print(len(data[0]))
-                        print(len(data[1]))
-                        print(len(data[2]))
-                        print(len(data[3]))
-                        print(len(data[0][0]))
-                        print(len(data[1][0]))
 
                 else: # SKARAB
                     
@@ -281,6 +271,7 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                         print("MODE: SPECTRA (Vertical Averaging)")
                         for i in range(len(data)):
                             averages.append(np.nanmean(data[i], axis=0)) # <--- MEDIA VERTICALE
+                            rms_averages.append(np.nanstd(data[i], axis=0)) # <--- RMS VERTICALE
                             
                         # Creazione asse X (Canali)
                         x = np.linspace(0, len(averages[0]), len(averages[0]))
@@ -291,7 +282,11 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                         # Caso TOTAL POWER (Singolo punto per riga)
                         for i in range(len(data)):
                             # Qui data[i] � gi� un array di singoli punti (la serie temporale)
-                            averages.append(data[i]) 
+                            averages.append(data[i])
+                            # Per TP non c'è la dimensione temporale su cui fare nanstd per canale,
+                            # calcoliamo la deviazione standard globale del subscan e la replichiamo
+                            tp_std = float(np.nanstd(data[i]))
+                            rms_averages.append(np.full_like(data[i], tp_std))
                     
                         # Creazione asse X (Punti Campione)
                         x = np.linspace(0, len(averages[0]), len(averages[0]))
@@ -311,6 +306,7 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                     state.CURRENT_SPEC.update({
                         'x': x,               # Canali (0..65535)
                         'averages': averages, # Lista di array delle polarizzazioni
+                        'rms_averages': rms_averages, # Lista di array degli RMS
                         'f_min': f_min_val,   # Inizio banda MHz
                         'f_max': f_max_val,   # Fine banda MHz
                         'filename': filename_prefix,
@@ -338,6 +334,7 @@ def _extract_data_and_perform_averages(filepath, filename_prefix, filename_exten
                     if n_array > 0:
                         print(f"Lunghezza primo array: {len(state.CURRENT_SPEC['averages'][0])} canali")
                         print(f"Primi 5 valori primo array: {state.CURRENT_SPEC['averages'][0][:5]}")
+                        print(f"Primi 5 valori RMS primo array: {state.CURRENT_SPEC['rms_averages'][0][:5]}")
 
                     print("---------------------------------")
 
@@ -528,14 +525,22 @@ def _extract_skarab_nodding_data(filepath, spectrum_type, chs, start_time_total)
     """
     data = []
     averages = []
+    rms_averages = []  # <--- Inizializzazione lista RMS
     x = None
+
+    # Regardless to the spectrum type, the number of channels per spectrum is extracted from the SECTION TABLE
+    # In case of spectrum type = 'stokes' chs refers only to one polarization type
+    # Therefore in this case we need to multiply chs by a factor 4 (the four polarizations)
+    
+    if(spectrum_type == 'stokes'):
+    
+            chs = chs * 4
     
     try:
         with fits.open(filepath) as hdul:
             data_table_columns = hdul["DATA TABLE"].columns.names
             
             # --- LOGICA DI ESTRAZIONE SKARAB (come richiesto) ---
-
             
             if spectrum_type in ['spectra', 'simple']:
                 # Caso SPECTRA/SIMPLE: Dati in due canali (Ch0 e Ch1)
@@ -576,6 +581,7 @@ def _extract_skarab_nodding_data(filepath, spectrum_type, chs, start_time_total)
             for item in data:
                 # np.nanmean per gestione di eventuali NaN (sicurezza)
                 averages.append(np.nanmean(item, axis=0)) 
+                rms_averages.append(np.nanstd(item, axis=0)) # <--- Calcolo deviazione standard (RMS)
             
             # Creazione asse X (Canali)
             x = np.linspace(0, len(averages[0]), len(averages[0]))
@@ -584,11 +590,10 @@ def _extract_skarab_nodding_data(filepath, spectrum_type, chs, start_time_total)
             avg_data_time = time.time()
             print(f"PROFILING: [Timer 1] data averaged in {avg_data_time - load_data_time:.4f} secondi.")
 
-
-
             
             return {
                 'averages': averages, 
+                'rms_averages': rms_averages, 
                 'x': x, 
                 'x_axis_label_val': x_axis_label_val, 
                 'spectrum_type': spectrum_type,
@@ -760,26 +765,25 @@ def process_skarab_nodding_pair(filepaths_tuple, common_prefix, feed_A_id, feed_
     print(f"\n--- PROFILING INIZIATO: Nodding Pair {common_prefix} ---")
 
     # ----------------------------------------------------------------------
-    # TIMER 1: I/O Disco e Calcolo Media per entrambi i file A e B
+    # TIMER 1: I/O Disco e Calcolo Media/RMS per entrambi i file A e B
     start_time_io_calc = time.time()
     
-    # 1. ESTRAZIONE DATI FILE A
-    # _extract_skarab_nodding_data esegue I/O e calcola np.nanmean
+    # 1. ESTRAZIONE DATI FILE A (Estare 'averages' ed 'rms_averages')
     result_A = _extract_skarab_nodding_data(file_A_path, spectrum_type, chs, start_time_total)
     if result_A is None: 
         print(f"Errore estrazione dati A per {common_prefix}")
         return
 
-    # 2. ESTRAZIONE DATI FILE B
+    # 2. ESTRAZIONE DATI FILE B (Estrae 'averages' ed 'rms_averages')
     result_B = _extract_skarab_nodding_data(file_B_path, spectrum_type, chs, start_time_total)
     if result_B is None: 
         print(f"Errore estrazione dati B per {common_prefix}")
         return
     
 
-    # 3. UNIFICAZIONE DEI DATI
-    # averages_A = [A_Ch0, A_Ch1] o [A_Ch0]. averages_B = [B_Ch0, B_Ch1] o [B_Ch0]
+    # 3. UNIFICAZIONE DEI DATI (Medie ed RMS)
     final_averages = result_A['averages'] + result_B['averages']
+    final_rms_averages = result_A['rms_averages'] + result_B['rms_averages'] # <--- NUOVO: Unificazione vettori RMS
     
     # 4. Preparazione della Legenda (per il plotter)
     if spectrum_type in ['spectra', 'simple']:
@@ -794,8 +798,9 @@ def process_skarab_nodding_pair(filepaths_tuple, common_prefix, feed_A_id, feed_
         print(f"Tipo di spettro non riconosciuto per Nodding: {spectrum_type}")
         return
 
-    if len(final_averages) != expected_lines:
-         print(f"Errore di unificazione Nodding: attese {expected_lines} linee, trovate {len(final_averages)}.")
+    # Check di consistenza su medie e RMS
+    if len(final_averages) != expected_lines or len(final_rms_averages) != expected_lines:
+         print(f"Errore di unificazione Nodding: attese {expected_lines} linee, trovate {len(final_averages)} medie e {len(final_rms_averages)} RMS.")
          return
 
     # Extract data from primary header for upper x-axis
@@ -813,70 +818,37 @@ def process_skarab_nodding_pair(filepaths_tuple, common_prefix, feed_A_id, feed_
 
     # Caricamento nel dizionario condiviso
     state.CURRENT_SPEC.update({
-        'x': x,               # Canali (0..65535)
-        'averages': final_averages, # Lista di array delle polarizzazioni
-        'f_min': f_min_val,   # Inizio banda MHz
-        'f_max': f_max_val,   # Fine banda MHz
+        'x': x,                       # Canali (0..65535)
+        'averages': final_averages,   # Lista di array delle medie
+        'rms_averages': final_rms_averages, # <--- NUOVO: Lista di array degli RMS
+        'f_min': f_min_val,           # Inizio banda MHz
+        'f_max': f_max_val,           # Fine banda MHz
         'filename': common_prefix,
         'legend_labels': [f"Feed {f}" for f in feeds],
         'spectrum_type': spectrum_type,
-        'updated': True       # Notifica il server
+        'updated': True               # Notifica il server
     })
 
     set_tab_labels(spectrum_type)
 
     end_time_io_calc = time.time()
-    #print(f"PROFILING: [Timer 1 NODDING] I/O Disco + Calcolo Media completato in {end_time_io_calc - start_time_io_calc:.4f} secondi.")
     print(f"PROFILING: [Timer 2 NODDING] Visualizzazione Bokeh in {end_time_io_calc - start_time_io_calc:.4f} secondi.")
   
     # ----------------------------------------------------------------------
-   
-
-    #state.CURRENT_SPEC['updated'] = True
-         
-
-    '''
-    # 5. GENERAZIONE PLOT (Contiene i Timer 2 e 3)
-    # L'argomento start_time_total viene usato qui per calcolare il tempo totale finale
-    plot_url = _plot_and_save_skarab_nodding_html(
-        PLOT_SAVE_DIR,
-        common_prefix, 
-        final_averages, 
-        result_A['x'], 
-        feeds_for_legend, 
-        spectrum_type,
-        result_A['x_axis_label_val'],
-        start_time_total,
-        freq,
-        lo,
-        bw
-    )
-    '''
-    
-
-
     
     # 6. Emissione SocketIO
-    # if plot_url and _socketio_instance:
     if _socketio_instance:
          
         # --- UTILIZZO DEI DATI PASSATI ---
-        # Usiamo il dizionario header_data gi� passato.
-        # Aggiungiamo o modifichiamo i campi per riflettere lo stato di "Nodding Pair".
-        
-        # L'header reale � gi� contenuto in primary_header_data['header']
         final_data_to_emit = primary_header_data.copy()
         final_data_to_emit['filename'] = f"Nodding Pair: {common_prefix} (Feeds {feed_A_id}, {feed_B_id})"
-        # final_data_to_emit['plot_url'] = plot_url
         final_data_to_emit['feeds'] = f"[{feed_A_id}, {feed_B_id}]"
         final_data_to_emit['backend'] = BACKEND
         final_data_to_emit['spectrum'] = spectrum_type
         
         # Modifica l'header stesso per aggiungere un commento sul Nodding
         if 'header' in final_data_to_emit:
-            # Sovrascrive/Aggiunge il commento per chiarire
             final_data_to_emit['header']['COMMENT'] = "Dati Nodding Pair (Unificazione Feeds A+B)"
-            
             
             _socketio_instance.start_background_task(
                 _socketio_instance.emit, 'fits_header_update', final_data_to_emit
@@ -885,27 +857,6 @@ def process_skarab_nodding_pair(filepaths_tuple, common_prefix, feed_A_id, feed_
             print(f"NODDING: Emesso header e plot URL per la coppia {common_prefix}.")
     
     
-    """
-    # 6. Emissione SocketIO
-    if plot_url and _socketio_instance:
-         # Assumendo che tu abbia un modo per recuperare l'header (es. dal file A)
-         nodding_data = {
-             "filename": f"Nodding Pair: {common_prefix} (Feeds {feed_A_id}, {feed_B_id})",
-             "plot_url": plot_url,
-             "feeds": f"[{feed_A_id}, {feed_B_id}]",
-             "backend": BACKEND,
-             "spectrum_type": spectrum_type,
-             "header": {"COMMENT": "Dati generati dal Nodding Pair Manager"}
-         }
-         # Assumiamo _socketio_instance.start_background_task sia il metodo corretto
-         _socketio_instance.start_background_task(
-             _socketio_instance.emit, 'fits_header_update', nodding_data
-         )
-    
-    # Non � necessario un return esplicito per il thread, la funzione termina qui. """
-
-
-
 
 def _get_skarab_feed_id_from_path(filepath):
     """
